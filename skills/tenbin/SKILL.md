@@ -1,6 +1,6 @@
 ---
 name: tenbin
-description: "Use for any judgment code must make from text: classify, categorize, tag, route or triage tickets/emails/messages, detect spam/abuse/injection/policy violations, score severity/urgency/sentiment/quality, rank or re-rank candidates, pick a taxonomy node, validate an extraction or an LLM answer, decide escalation to a human, set confidence thresholds, or build a guardrail. Also when someone says tenbin, TypeSafe, System One, Jev, Choice/Score/Noul, calibrated probability, or would otherwise prompt an LLM for a label, boolean, rating or JSON category, hand-write regex heuristics for a judgment call, or ask how reliable a classifier is. Not for generating text. Covers design, lint, measurement on labelled data and production SDK code."
+description: "Judgments code makes from text: classify/route/triage, detect spam/abuse/injection, score severity/sentiment, rank, validate an extraction or LLM answer, escalate, thresholds, guardrails. Also tenbin, TypeSafe, Jev, Choice/Score/Noul, calibrated probability, prompting an LLM for a label, regex heuristics, classifier reliability. Not text generation."
 license: MIT
 ---
 
