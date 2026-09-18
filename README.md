@@ -74,6 +74,36 @@ The MCP starts without a key, and only `tenbin_lint_questions` is usable (offlin
 
 Tell the agent "use the tenbin skill" and it proceeds in order: decompose the judgment → lint → evaluate a few samples → accuracy per band on labeled data → put thresholds in code. Production code calls the SDK directly, not the MCP.
 
+## Configuration
+
+Everything is configured through environment variables. The recommended place for them is
+`~/.config/tenbin/env` (`KEY=value`, one per line, `chmod 600`; `make env-file` creates it):
+
+```sh
+TYPESAFE_API_KEY=...               # required for anything that calls the API
+TYPESAFE_DEFAULT_MODEL=jev-latest  # optional
+TENBIN_CONCURRENCY=8               # optional
+```
+
+The MCP wrapper registered by `make register-claude` sources this file at start-up, and
+`skills/tenbin/scripts/evaluate.py` reads it when `TYPESAFE_API_KEY` is not already set, so the
+key never lands in a shell rc file or in Claude's config. Plain environment variables work too
+(`claude mcp add tenbin -e TYPESAFE_API_KEY=$TYPESAFE_API_KEY -- node .../dist/index.js`).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TYPESAFE_API_KEY` | – | API key from https://console.typesafe.ai/settings/keys. Without it the MCP starts in offline mode (lint only) |
+| `TYPESAFE_DEFAULT_MODEL` | `jev-latest` | Model when a call omits `model`; pin `jev-1.13.0` while calibrating thresholds |
+| `TENBIN_MAX_TOKENS_PER_CALL` | `60000` | Estimated input tokens allowed per request (capped at the API's 64000) |
+| `TENBIN_SESSION_TOKEN_BUDGET` | `20000000` | Tokens one MCP process may spend (≈ $0.84); `BudgetExceededError` after that |
+| `TENBIN_CONCURRENCY` | `8` | Parallel requests in `evaluate_many` and `rank`; lower it on 429 |
+| `TENBIN_MAX_STATES` | `500` | States per `evaluate_many` call |
+
+`TENBIN_*` values must be positive integers; an invalid value fails at start-up. Change the
+file, then restart the Claude Code session so the MCP picks it up. Never set
+`TYPESAFE_LOG_LEVEL=debug` in production: the SDK logs request bodies unredacted.
+Details and other clients' formats: [docs/04-runbook.md](docs/04-runbook.md) §2.
+
 ## Verifying it works
 
 ```sh
