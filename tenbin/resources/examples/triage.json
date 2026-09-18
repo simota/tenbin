@@ -1,0 +1,10 @@
+{
+  "state": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card. What are you going to do about this?",
+  "questions": {
+    "department": {"type": "choice", "instructions": "Which team should handle this?", "criteria": {"returns": "Exchanges, refunds, wrong or damaged items", "shipping": "Delivery status, delays, lost packages", "billing": "Charges, invoices, payment problems"}},
+    "return_reason": {"type": "choice", "instructions": "If the customer wants to return something, why?", "criteria": {"wrong_size": "The item doesn't fit", "wrong_item": "A different product was delivered", "damaged": "The item arrived broken or faulty", "changed_mind": "The item is fine, the customer no longer wants it", "other": "A return reason that fits none of the above"}},
+    "requested_resolution": {"type": "choice", "instructions": "What does the customer want to happen?", "criteria": {"exchange": "Swap the item for a different one", "refund": "Money back", "replacement": "The same item sent again", "information": "Just an answer, no action needed"}},
+    "frustration": {"type": "score", "instructions": "How frustrated is the customer?", "criteria": ["Calm, just stating facts", "Frustrated but civil", "Very angry, strong language or threatening to leave"]},
+    "is_urgent": {"type": "noul", "instructions": "The message conveys urgency or time-sensitivity"}
+  }
+}
