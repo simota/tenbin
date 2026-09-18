@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -93,6 +94,31 @@ class ClassicRules(unittest.TestCase):
         state = {"ticket": {"messages": [{"text": "hi"}]}, "order": {"id": "A-1"}}
         r = lint({"q": {"type": "noul", "instructions": "Does `ticket.messages[0].text` mention `order.total`?"}}, state)
         self.assertEqual([x for x in rules(r) if x[2] == "state_path_missing"], [("warning", "q", "state_path_missing")])
+
+
+class StateFields(unittest.TestCase):
+    def test_unused_fields_warn_with_arrays_and_sample_uid_handled(self):
+        state = {"ticket": {"text": "refund please", "sender": "a@b.com"}, "customer": {"plan": "pro", "orders": [{"id": "A-1"}]},
+                 "marketing": {"segment": "x"}, "sample_uid": "s0"}
+        r = lint({"q": {"type": "noul", "instructions": "Does `ticket.text` ask for a refund on one of `customer.orders`?"}}, state)
+        unused = sorted(re.search(r"`([^`]+)`", f["message"]).group(1) for f in r["warnings"] if f["rule"] == "state_field_unused")
+        self.assertEqual(unused, ["customer.plan", "marketing", "ticket.sender"])
+        self.assertEqual(r["errors"], [])
+        covered = lint({"q": {"type": "noul", "instructions": "Does `ticket` ask for a refund?"}}, {"ticket": {"text": "x", "sender": "y"}})
+        self.assertEqual(covered["warnings"], [])
+
+    def test_unused_check_skipped_when_no_question_uses_paths(self):
+        r = lint({"q": {"type": "noul", "instructions": "Is the customer asking for a refund?"}}, {"ticket": "refund please", "customer": {"plan": "pro"}})
+        self.assertNotIn("state_field_unused", {rule for _, _, rule in rules(r)})
+
+    def test_forbidden_names_and_paths_are_errors(self):
+        state = {"customer": {"email": "a@b.com", "payment": {"cardNumber": "4111"}}, "orders": [{"id": "A-1", "card": {"cardNumber": "4222"}}], "ssn": "1"}
+        q = {"q": {"type": "noul", "instructions": "Does `customer.email` look like a company address?"}}
+        r = lint(q, state, forbidden=["cardNumber", "ssn"])
+        self.assertEqual(sorted(re.search(r"`([^`]+)`", f["message"]).group(1) for f in r["errors"]),
+                         ["customer.payment.cardNumber", "orders[].card.cardNumber", "ssn"])
+        self.assertEqual(len(lint(q, state, forbidden=["customer.payment"])["errors"]), 1)
+        self.assertEqual(lint(q, state)["errors"], [])
 
 
 if __name__ == "__main__":

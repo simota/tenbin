@@ -3,16 +3,18 @@ import { errorResult, toolResult } from "../format.js";
 import { lintQuestions } from "../lint.js";
 import { questionsSchema, stateSchema } from "../schemas.js";
 import { PRICE_PER_MTOK_USD } from "../config.js";
+import { z } from "zod";
 import type { Questions } from "../types.js";
 
 export const lintInput = {
   questions: questionsSchema,
-  state: stateSchema.optional().describe("If given, backticked paths in instructions are checked against it and the token budget is estimated"),
+  state: stateSchema.optional().describe("If given, backticked paths in instructions are checked against it, fields no question references are reported, and the token budget is estimated"),
+  forbidden: z.array(z.string()).optional().describe("Field names or dot-paths the state must not contain (e.g. [\"cardNumber\", \"customer.ssn\"]); a match is an error"),
 };
 
 export function makeLint(maxTokensPerCall: number) {
-  return async (args: { questions: Questions; state?: unknown }) => {
-    const r = lintQuestions(args.questions, args.state, maxTokensPerCall);
+  return async (args: { questions: Questions; state?: unknown; forbidden?: string[] }) => {
+    const r = lintQuestions(args.questions, args.state, maxTokensPerCall, args.forbidden ?? []);
     return toolResult({ ...r, ok: r.errors.length === 0 });
   };
 }

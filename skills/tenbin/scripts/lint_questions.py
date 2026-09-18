@@ -3,7 +3,7 @@
 
 Mirrors the rules of tenbin (src/lint.ts). Usage:
 
-    python lint_questions.py questions.json [--state state.json] [--max-tokens 64000]
+    python lint_questions.py questions.json [--state state.json] [--max-tokens 64000] [--forbidden cardNumber,customer.ssn]
 
 questions.json is either {"<id>": {...}} or {"state": ..., "questions": {...}}.
 Exit code 1 when any error is found.
@@ -78,7 +78,57 @@ def resolve(state: Any, path: str) -> bool:
     return True
 
 
-def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_TOKENS) -> dict[str, Any]:
+# Set by evaluate.py --repeat / evaluate_many; never referenced by a question.
+IMPLICIT_STATE_FIELDS = {"sample_uid"}
+
+
+def covers(a: str, b: str) -> bool:
+    return a == b or b.startswith(a + ".") or b.startswith(a + "[")
+
+
+def unused_state_fields(state: Any, used: list[str]) -> list[str]:
+    """Object-key paths of state that no question path touches (names it, an ancestor or a descendant).
+
+    Arrays count as one field; only the highest unused ancestor is returned."""
+    out: list[str] = []
+
+    def walk(obj: dict[str, Any], prefix: str) -> None:
+        for key, value in obj.items():
+            if not prefix and key in IMPLICIT_STATE_FIELDS:
+                continue
+            path = f"{prefix}.{key}" if prefix else key
+            if any(covers(u, path) for u in used):
+                continue
+            if any(covers(path, u) for u in used):
+                if isinstance(value, dict):
+                    walk(value, path)
+                continue
+            out.append(path)
+
+    if isinstance(state, dict):
+        walk(state, "")
+    return out
+
+
+def forbidden_state_paths(state: Any, forbidden: list[str]) -> list[str]:
+    """Every path in state (indices normalised to []) equal to a forbidden entry or ending with .<entry>."""
+    hits: dict[str, None] = {}
+
+    def walk(value: Any, path: str) -> None:
+        if path and any(path == f or path.endswith("." + f) for f in forbidden):
+            hits[path] = None
+        if isinstance(value, list):
+            for item in value:
+                walk(item, f"{path}[]")
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                walk(child, f"{path}.{key}" if path else key)
+
+    walk(state, "")
+    return list(hits)
+
+
+def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_TOKENS, forbidden: list[str] | None = None) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
 
     def push(qid: str, rule: str, sev: str, msg: str, fix: str) -> None:
@@ -160,6 +210,18 @@ def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_T
                     push(qid, "state_path_missing", "warning", f"path `{path}` referenced in instructions does not exist in state or in the instructions object",
                          "Fix the path or add the field to state.")
 
+    if state is not None:
+        for path in forbidden_state_paths(state, forbidden or []):
+            push("", "state_path_forbidden", "error", f"state contains forbidden path `{path}`",
+                 "Remove the field in code before building the state; the model must never see it.")
+        # Only when the questions use the path convention at all; otherwise every field would be "unused".
+        used = [p for q in questions.values() if isinstance(q, dict)
+                for p in PATH.findall(text(q.get("instructions"))) if resolve(state, p)]
+        if used:
+            for path in unused_state_fields(state, used):
+                push("", "state_field_unused", "warning", f"state field `{path}` is not referenced by any question",
+                     "Remove it from the state (irrelevant content lowers accuracy) or reference it from a question.")
+
     est_state = tokens(state if state is not None else "")
     per_q = [tokens(q) for q in questions.values()]
     est_questions = sum(per_q)
@@ -188,6 +250,7 @@ def main() -> int:
     ap.add_argument("questions", help="JSON file: questions map, or {state, questions}")
     ap.add_argument("--state", help="JSON file with the state (overrides an embedded one)")
     ap.add_argument("--max-tokens", type=int, default=TOTAL_TOKENS)
+    ap.add_argument("--forbidden", default="", help="comma-separated field names or dot-paths the state must not contain")
     args = ap.parse_args()
 
     with open(args.questions, encoding="utf-8") as fh:
@@ -200,7 +263,7 @@ def main() -> int:
         with open(args.state, encoding="utf-8") as fh:
             state = json.load(fh)
 
-    result = lint(questions, state, args.max_tokens)
+    result = lint(questions, state, args.max_tokens, [f for f in args.forbidden.split(",") if f])
     json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
     print()
     return 1 if result["errors"] else 0

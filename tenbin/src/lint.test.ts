@@ -93,3 +93,27 @@ test("date_comparison needs a date-like object after before/after", () => {
   const bad = lintQuestions({ q: { type: "noul", instructions: "Was the invoice issued before 2026-01-01?" } });
   assert.ok(bad.warnings.some((f) => f.rule === "date_comparison"));
 });
+
+test("state fields no question references are warnings, arrays and sample_uid included", () => {
+  const state = { ticket: { text: "refund please", sender: "a@b.com" }, customer: { plan: "pro", orders: [{ id: "A-1" }] }, marketing: { segment: "x" }, sample_uid: "s0" };
+  const r = lintQuestions({ q: { type: "noul", instructions: "Does `ticket.text` ask for a refund on one of `customer.orders`?" } }, state);
+  assert.deepEqual(r.warnings.map((f) => f.rule + ":" + f.message.match(/`([^`]+)`/)![1]).sort(), ["state_field_unused:customer.plan", "state_field_unused:marketing", "state_field_unused:ticket.sender"]);
+  assert.equal(r.errors.length, 0);
+  // a question naming the parent covers every child
+  const covered = lintQuestions({ q: { type: "noul", instructions: "Does `ticket` ask for a refund?" } }, { ticket: { text: "x", sender: "y" } });
+  assert.deepEqual(covered.warnings, []);
+});
+
+test("unused-field check is skipped when no question uses state paths", () => {
+  const r = lintQuestions({ q: { type: "noul", instructions: "Is the customer asking for a refund?" } }, { ticket: "refund please", customer: { plan: "pro" } });
+  assert.ok(!r.warnings.some((f) => f.rule === "state_field_unused"));
+});
+
+test("forbidden field names and paths in the state are errors", () => {
+  const state = { customer: { email: "a@b.com", payment: { cardNumber: "4111" } }, orders: [{ id: "A-1", card: { cardNumber: "4222" } }], ssn: "1" };
+  const r = lintQuestions({ q: { type: "noul", instructions: "Does `customer.email` look like a company address?" } }, state, undefined, ["cardNumber", "ssn"]);
+  assert.deepEqual(r.errors.map((f) => f.message.match(/`([^`]+)`/)![1]).sort(), ["customer.payment.cardNumber", "orders[].card.cardNumber", "ssn"]);
+  const exact = lintQuestions({ q: { type: "noul", instructions: "Does `customer.email` look like a company address?" } }, state, undefined, ["customer.payment"]);
+  assert.equal(exact.errors.length, 1);
+  assert.equal(lintQuestions({ q: { type: "noul", instructions: "Does `customer.email` look like a company address?" } }, state).errors.length, 0, "no list, no error");
+});

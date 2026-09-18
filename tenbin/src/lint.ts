@@ -54,6 +54,52 @@ export function extractStatePaths(value: unknown): string[] {
   return found.map((m) => m.slice(1, -1));
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Set by evaluate_many / evaluate.py --repeat; never referenced by a question. */
+const IMPLICIT_STATE_FIELDS = new Set(["sample_uid"]);
+
+function covers(a: string, b: string): boolean {
+  return a === b || b.startsWith(a + ".") || b.startsWith(a + "[");
+}
+
+/**
+ * Object-key paths of `state` that no question path touches: a path is used when a question
+ * names it, an ancestor of it, or a descendant of it. Arrays count as one field. Only the
+ * highest unused ancestor is returned, so an unused subtree is one finding.
+ */
+export function unusedStateFields(state: unknown, used: string[]): string[] {
+  const out: string[] = [];
+  const walk = (obj: Record<string, unknown>, prefix: string) => {
+    for (const key of Object.keys(obj)) {
+      if (!prefix && IMPLICIT_STATE_FIELDS.has(key)) continue;
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (used.some((u) => covers(u, path))) continue;
+      if (used.some((u) => covers(path, u))) {
+        if (isPlainObject(obj[key])) walk(obj[key], path);
+        continue;
+      }
+      out.push(path);
+    }
+  };
+  if (isPlainObject(state)) walk(state, "");
+  return out;
+}
+
+/** Every path in `state` (indices normalised to `[]`) that equals a forbidden entry or ends with `.<entry>`. */
+export function forbiddenStatePaths(state: unknown, forbidden: string[]): string[] {
+  const hits = new Set<string>();
+  const walk = (value: unknown, path: string) => {
+    if (path && forbidden.some((f) => path === f || path.endsWith("." + f))) hits.add(path);
+    if (Array.isArray(value)) for (const item of value) walk(item, `${path}[]`);
+    else if (isPlainObject(value)) for (const key of Object.keys(value)) walk(value[key], path ? `${path}.${key}` : key);
+  };
+  walk(state, "");
+  return [...hits];
+}
+
 export function resolvePath(state: unknown, path: string): boolean {
   const parts = path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
   let cur: unknown = state;
@@ -146,7 +192,7 @@ function lintQuestion(id: string, q: Question, state: unknown, push: (f: Omit<Fi
   }
 }
 
-export function lintQuestions(questions: Questions, state?: unknown, maxTokensPerCall: number = API_LIMITS.totalTokens): LintResult {
+export function lintQuestions(questions: Questions, state?: unknown, maxTokensPerCall: number = API_LIMITS.totalTokens, forbidden: string[] = []): LintResult {
   const findings: Finding[] = [];
   const ids = Object.keys(questions);
   if (ids.length === 0) {
@@ -154,6 +200,19 @@ export function lintQuestions(questions: Questions, state?: unknown, maxTokensPe
   }
   for (const id of ids) {
     lintQuestion(id, questions[id] as Question, state, (f) => findings.push({ question_id: id, ...f }));
+  }
+
+  if (state !== undefined) {
+    for (const path of forbiddenStatePaths(state, forbidden)) {
+      findings.push({ question_id: "", rule: "state_path_forbidden", severity: "error", message: `state contains forbidden path \`${path}\``, fix: "Remove the field in code before building the state; the model must never see it." });
+    }
+    // Only when the questions use the path convention at all; otherwise every field would be "unused".
+    const used = ids.flatMap((id) => extractStatePaths((questions[id] as Question).instructions)).filter((p) => resolvePath(state, p));
+    if (used.length > 0) {
+      for (const path of unusedStateFields(state, used)) {
+        findings.push({ question_id: "", rule: "state_field_unused", severity: "warning", message: `state field \`${path}\` is not referenced by any question`, fix: "Remove it from the state (irrelevant content lowers accuracy) or reference it from a question." });
+      }
+    }
   }
 
   const est = estimateRequestTokens(state ?? "", questions);

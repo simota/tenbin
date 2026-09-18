@@ -48,8 +48,11 @@ closed tickets never reach this point, and nothing the questions do not referenc
 
 ## Checks before sending
 
-- Every field is referenced by at least one question; remove the rest.
+- Every field is referenced by at least one question; remove the rest (lint warns `state_field_unused`
+  once any question uses a backticked path).
 - Every backticked path resolves (`tenbin_lint_questions` / `scripts/lint_questions.py --state`).
+- Fields the model must never see are named in `forbidden` (tool) / `--forbidden` (script); a match
+  is a lint error (`state_path_forbidden`).
 - Nothing in the state asks the model to compute, count or compare dates.
 - Injected instructions inside user-supplied text cannot change the criteria: criteria are
   explicit, and adversarial rows are in the labelled test set.

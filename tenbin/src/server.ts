@@ -17,7 +17,7 @@ export function createServer(config: Config, gateway: TypeSafeGateway | null): M
 
   server.registerTool("tenbin_lint_questions", {
     title: "Lint TypeSafe questions (offline)",
-    description: "Static checks on a questions map without calling the API: level/option counts, numeric-only or degree-only levels, compound or counting/date instructions, inverted Noul criteria, missing state paths, token budget. Run before tenbin_evaluate.",
+    description: "Static checks on a questions map without calling the API: level/option counts, numeric-only or degree-only levels, compound or counting/date instructions, inverted Noul criteria, missing state paths, state fields no question uses, forbidden state paths, token budget. Run before tenbin_evaluate.",
     inputSchema: lintInput,
     annotations: LOCAL,
   }, makeLint(config.maxTokensPerCall));
