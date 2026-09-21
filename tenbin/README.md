@@ -26,7 +26,7 @@ Generic `mcpServers` entry:
 { "tenbin": { "command": "node", "args": ["/abs/path/tenbin/dist/index.js"], "env": { "TYPESAFE_API_KEY": "${TYPESAFE_API_KEY}" } } }
 ```
 
-Without `TYPESAFE_API_KEY` the server starts in offline mode and exposes `tenbin_lint_questions`, the `tenbin` prompt, and all guide/example resources.
+Without `TYPESAFE_API_KEY` the server starts in offline mode and exposes `tenbin_lint_questions`, the `tenbin`, `design_integration`, `design_questions` and `decompose_judgment` prompts, and all guide/example resources.
 
 ## `tenbin` command: project-use suggestions
 
@@ -51,6 +51,47 @@ Command display names depend on the client; this is an MCP prompt, not a tool or
 shell subcommand. For the standalone skill, use `/tenbin` or `$tenbin` as supported by
 the host. After updating a running server, rebuild and restart the MCP client/session.
 
+## Contextual code and question generation
+
+Select `design_integration` to design and generate code using Jev in the current
+project. The host agent inspects the relevant types, runtime, SDK usage and test
+conventions, designs state/questions, then implements SDK calls, decision logic,
+failure handling, application wiring and mocked tests. Production calls the SDK
+directly; generation needs no TypeSafe API key. A design-only request returns the
+concrete design without edits. Paid model evaluation is separate and runs when requested.
+
+Select `design_questions` to suggest or generate just state/questions. It produces
+matching `{state, questions}` JSON, field sources, assumptions, type rationale and
+an actual lint result. It can preserve an existing state or questions map and design
+the other part. Missing context triggers a focused question; synthetic samples are
+labelled and never presented as measured results.
+
+Both prompts accept optional string arguments:
+
+| Argument | Meaning |
+|---|---|
+| `context` | Relevant project flow, conversation excerpt or requirements; defaults to host context |
+| `goal` | The decision or feature; when omitted, propose candidates and use the best-supported one |
+| `sample_state` | Example input, either JSON encoded as a string or plain text |
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"design_integration","arguments":{"goal":"Route support tickets in the existing service"}}}
+{"jsonrpc":"2.0","id":2,"method":"prompts/get","params":{"name":"design_questions","arguments":{"sample_state":"{\"ticket\":{\"message\":\"Please refund the duplicate charge.\"}}"}}}
+```
+
+Pass `arguments: {}` to use only the current context. The MCP SDK requires this
+object for prompts with an argument schema, even when all fields are optional.
+The argument-free `tenbin` prompt also embeds both guides and follows the request
+in the conversation. `decompose_judgment` retains `judgment` and optional
+`sample_state`, and shares the question-design workflow, now also offline.
+
+The design prompts return a workflow message plus a separate JSON message carrying
+supplied inputs; the host generates the artifacts. The server does not scan the
+client's repository, invoke a code-generation model, or evaluate drafts automatically.
+The guides are embedded for prompt-only clients and synced to the standalone skill.
+Mocked tests verify code behavior, not Jev accuracy; thresholds remain provisional
+until measured on labelled data.
+
 ## Tools
 
 | tool | what | API |
@@ -63,8 +104,8 @@ the host. After updating a running server, rebuild and restart the MCP client/se
 | `tenbin_list_models` | `GET /v1/models` + pricing | 1 call |
 | `tenbin_session_stats` | calls, tokens, cost, remaining budget | none |
 
-Resources: `tenbin://guide/{suggestions,primitives,confidence,patterns,jaggedness,cookbooks}`, `tenbin://examples/{triage,guardrail,extraction}`.
-Prompts: `tenbin` (also offline), `decompose_judgment`, `design_thresholds`, `review_typesafe_code`.
+Resources: `tenbin://guide/{suggestions,integration-design,question-design,primitives,confidence,patterns,jaggedness,cookbooks}`, `tenbin://examples/{triage,guardrail,extraction}`.
+Prompts: `tenbin`, `design_integration`, `design_questions`, `decompose_judgment` (all also offline), `design_thresholds`, `review_typesafe_code`.
 
 ## Configuration
 

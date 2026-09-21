@@ -31,11 +31,11 @@ npm run build
 node dist/index.js        # "[tenbin] ready (model jev-latest)" on stderr means it worked. Ctrl-C to exit
 ```
 
-Without the key, the following appears and the server starts in **offline mode** (suggestions, lint, and resources):
+Without the key, the following appears and the server starts in **offline mode** (suggestions, state/question and code generation, lint, and resources):
 
 ```
 [tenbin] TYPESAFE_API_KEY is not set. ...
-[tenbin] Starting in offline mode: tenbin_lint_questions, the tenbin prompt, and guide/example resources are available.
+[tenbin] Starting in offline mode: tenbin_lint_questions, the tenbin, design_questions, design_integration and decompose_judgment prompts, and guide/example resources are available.
 ```
 
 ### 2.2 Storing the key (the `~/.config/tenbin/env` approach)
@@ -148,9 +148,59 @@ After updating an installed MCP, run `npm run build` in `tenbin/` and restart th
 MCP client/session. Check that `prompts/list` contains `tenbin` and the prompt opens
 without arguments, including offline.
 
+### 3.0.1 Generate Jev code for the current project
+
+Use `/tenbin このプロジェクトに合うJev利用コードを設計・生成して`, or select the MCP
+`design_integration` prompt. Add a concrete goal when known. Optional arguments are
+`context` (project/conversation excerpt), `goal` (feature or decision), and
+`sample_state` (JSON encoded as a string or plain text). Omitted values use host context.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"design_integration","arguments":{"goal":"Add Jev ticket routing to the existing support service"}}}
+```
+
+Pass `arguments: {}` for current context only; the SDK requires this object for
+prompts with an argument schema even when all fields are optional. The argument-free
+`tenbin` prompt also routes explicit code-generation requests to the same workflow.
+
+Success means the host agent identifies the actual integration boundary, generates
+and lints state/questions, implements SDK calls and decision/failure handling, wires
+the feature into the application, and runs the project's build/typecheck/mocked tests.
+A code-generation request authorizes relevant local edits; design-only requests return
+a concrete design. Without project access, code is returned with proposed paths and
+explicitly marked not applied/verified. Missing context is requested, not invented.
+
+No TypeSafe key is needed for generation or mocked tests. Live evaluation runs only
+when requested; until then, thresholds are provisional and consequential actions
+keep a conservative fallback. Production code calls the SDK directly, not the MCP.
+The shared workflow is `tenbin://guide/integration-design`, also available in the skill.
+
+### 3.0.2 Generate state and questions only
+
+Use `/tenbin 今の文脈からstateとquestionを生成して` or the MCP `design_questions`
+prompt with the same optional arguments. The existing `decompose_judgment` prompt
+keeps its required `judgment` and optional `sample_state`, and now works offline too.
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"prompts/get","params":{"name":"design_questions","arguments":{"goal":"Detect explicit refund requests","sample_state":"{\"ticket\":{\"message\":\"Please refund the duplicate charge.\"}}"}}}
+```
+
+Success means a copyable `{state, questions}` body, field-to-source-to-question
+mapping, stated assumptions, and actual lint with both state and questions. Synthetic
+samples are labelled; lint is not an accuracy measurement. Suggestion-only requests
+stop at candidates, and state-only/questions-only requests preserve the supplied part.
+Draft generation stops after lint unless evaluation, saving or implementation was
+already requested. The shared guide is `tenbin://guide/question-design`.
+
+For either new prompt, rebuild and restart the MCP after updating. Confirm both appear
+in `prompts/list` without a key and open with `arguments: {}`. The returned instructions
+and supplied-context message drive the host agent; prompts/get itself does not generate
+code or call TypeSafe. Both guides are embedded, including in `tenbin`, for clients
+that do not automatically read resources.
+
 ### 3.1 Design session (skill steps 1–9)
 
-1. Decompose the judgment and write `questions` (the `decompose_judgment` prompt).
+1. Generate a matching `state` and `questions` (`design_questions` or `decompose_judgment`). For code generation without live evaluation, use §3.0.1 instead.
 2. `tenbin_lint_questions`. Fix until **0 errors**. Fix warnings or write down why not.
 3. `tenbin_evaluate` on 2–3 cases (include boundary cases). Inspect the raw answers.
 4. `tenbin_evaluate_many` on labeled data (20+ rows per class). Use `repeat: 2` to check reproducibility too.
@@ -189,7 +239,7 @@ First look at stderr (the client's MCP log) and `tenbin_session_stats`. Error me
 
 | Symptom | Cause | Action |
 |---|---|---|
-| Only `tenbin_lint_questions` in the tool list | Started offline without a key; the `tenbin` prompt and resources remain available | For evaluation, set `TYPESAFE_API_KEY` and restart the MCP (restart the client). With the env-file approach, check that `~/.config/tenbin/env` exists, its permissions, and the `KEY=value` format |
+| Only `tenbin_lint_questions` in the tool list | Started offline without a key; discovery/design/generation prompts and resources remain available | For evaluation, set `TYPESAFE_API_KEY` and restart the MCP (restart the client). With the env-file approach, check that `~/.config/tenbin/env` exists, its permissions, and the `KEY=value` format |
 | `TypeSafe rejected the API key (401)` | Key invalid or revoked | Issue a new key in the Console and update the environment variable. `evaluate_many` stops on 401/403 and marks the remaining rows `skipped` |
 | `rejected the request body (422)` | Invalid criteria format, level count or option count | Run the same questions through `tenbin_lint_questions`. If lint passes and you still get 422, suspect a SDK / API discrepancy and check against the official API reference (https://docs.typesafe.ai/api) |
 | `Rate limited (429) after the SDK's automatic retries` | Too much concurrency | Lower `TENBIN_CONCURRENCY` (4 -> 2), or lower it with the tool's `concurrency` argument. Split the batch |

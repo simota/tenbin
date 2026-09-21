@@ -1,6 +1,6 @@
 ---
 name: tenbin
-description: "Suggest Tenbin uses for the current project with /tenbin or requests for ideas. Design judgments code makes from text: classify/route/triage, detect spam/abuse/injection, score severity/sentiment, rank, validate an extraction or LLM answer, escalate, thresholds, guardrails. Also tenbin, TypeSafe, Jev, Choice/Score/Noul, calibrated probability, prompting an LLM for a label, regex heuristics, classifier reliability. Jev does not generate text."
+description: "Design and generate project-specific code that uses Jev, including state/questions, SDK integration, decision logic and tests. Suggest Tenbin uses with /tenbin; suggest or generate state and questions from conversation, project context or sample input. Classify/route/triage, detect spam/abuse/injection, score severity/sentiment, rank, validate extraction or LLM answers, thresholds, guardrails. Also tenbin, TypeSafe, Jev, Choice/Score/Noul, calibrated probability, LLM labels, regex heuristics, classifier reliability. The host agent generates code; Jev evaluates typed judgments."
 license: MIT
 ---
 
@@ -26,6 +26,41 @@ The MCP equivalent is the `tenbin` prompt, which takes no arguments and uses the
 current project and conversation. It includes the same guide, also served at
 `tenbin://guide/suggestions`. Either entry is sufficient; do not invoke both recursively.
 
+## Design and generate Jev integration code
+
+For `/tenbin このプロジェクトに合うJev利用コードを設計・生成して` or a specific
+integration request, follow [reference/integration-design.md](reference/integration-design.md).
+Inspect the relevant project flow, conventions, types and tests. Design the input-to-action
+path, generate and lint state/questions, then implement the SDK boundary, result handling,
+application wiring and deterministic tests. A code-generation request continues through
+local edits and verification; a design-only request stops at the concrete design.
+Do not stop at a plan or questions JSON when usable application code was requested.
+
+The MCP equivalent is `design_integration`, with optional `context`, `goal` and
+`sample_state` strings (pass `arguments: {}` to use only the host context). The host
+agent generates code; the resulting application calls Jev directly through the SDK.
+An API key is unnecessary for generation and mocked tests. Without labelled evaluation,
+mark thresholds provisional and use a conservative fallback. Only run paid evaluation
+when requested; an absent key must not block local implementation.
+
+## Suggest or generate state and questions
+
+For `/tenbin 今の文脈からstateとquestionを生成して` or a request for just these
+artifacts, follow [reference/question-design.md](reference/question-design.md).
+Use the current goal, conversation, relevant files and any supplied input. Propose
+candidates when the decision is not chosen; a generation request continues with the
+best-supported one, producing `{state, questions}` JSON, field sources, assumptions
+and an actual offline lint result. A suggestion-only request stops at candidates.
+For a state-only or questions-only request, preserve the supplied counterpart.
+If context cannot support a draft, ask one focused question rather than inventing it.
+
+The MCP equivalent is `design_questions` with optional `context`, `goal` and
+`sample_state` strings (`arguments: {}` for host context only). `decompose_judgment`
+keeps its `judgment` / `sample_state` arguments and uses the same workflow. Both work
+offline. The argument-free `tenbin` prompt embeds both design guides and routes by
+the user's request. Stop after generation and lint unless evaluation, saving files
+or implementation is already requested.
+
 ## Absolute rules
 
 1. **Question ids are not sent to the model.** The complete question lives in `instructions`.
@@ -41,6 +76,8 @@ current project and conversation. It includes the same guide, also served at
 | | MCP server `tenbin` connected | No MCP |
 |---|---|---|
 | Suggest uses for this project | `tenbin` prompt, `tenbin://guide/suggestions` (also offline) | [reference/suggestions.md](reference/suggestions.md) |
+| Design/generate Jev integration code | `design_integration` prompt, `tenbin://guide/integration-design` (also offline) | [reference/integration-design.md](reference/integration-design.md) |
+| Suggest/generate state and questions | `design_questions` / `decompose_judgment` prompts, `tenbin://guide/question-design` (also offline) | [reference/question-design.md](reference/question-design.md) |
 | Knowledge | `tenbin://guide/{primitives,patterns,confidence,jaggedness,cookbooks}` | `reference/*.md` (same content) |
 | Lint | `tenbin_lint_questions` | `python scripts/lint_questions.py questions.json [--state state.json]` |
 | Try a few inputs | `tenbin_evaluate` | `python scripts/evaluate.py request.json [--repeat 2]` |
@@ -48,7 +85,8 @@ current project and conversation. It includes the same guide, also served at
 | Cost | `tenbin_session_stats` | `python scripts/estimate_cost.py` before; the `session` line of `evaluate.py` after |
 
 Detect API-enabled MCP execution by the presence of `tenbin_evaluate` in the tool list.
-An offline MCP still offers suggestions, resources, and `tenbin_lint_questions`.
+An offline MCP still offers suggestions, state/question and code generation, resources,
+and `tenbin_lint_questions`.
 For a requested evaluation without `tenbin_evaluate`, run the scripts yourself:
 they need only Python 3 and the key in `TYPESAFE_API_KEY` or
 `~/.config/tenbin/env`. `evaluate.py` lints first and refuses on lint errors, like the MCP tool.
@@ -102,6 +140,9 @@ means yes. No double negatives.
 
 Run the lint (tool or script). Fix every error; fix or justify every warning. Do not show the
 user questions that fail lint.
+For a state/question-only request, return the draft and lint result here. For code
+generation without requested live evaluation, continue to composition, implementation
+and mocked tests with provisional thresholds; do not block on a key or labelled data.
 
 ### 6. Try it, then measure it
 

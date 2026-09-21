@@ -17,6 +17,8 @@ Ask your coding agent for a judgment your code needs, and it comes back with a m
 | You ask | What you get | Behind it |
 |---|---|---|
 | `/tenbin` / "Where could Tenbin help this project?" | Proposals grounded in the current project and conversation: evidence, input and judgment type, integration point, uncertainty handling, and the smallest useful trial | skill discovery mode or MCP `tenbin` prompt; no API call |
+| "Design and generate Jev code for this project" | Project-specific state/questions, SDK calls, decision logic, failure handling, application wiring and mocked tests | skill contextual integration or MCP `design_integration`; generation needs no API key |
+| "Generate state and questions from this context" / "Suggest questions for this input" | Matching `{state, questions}` JSON, field sources, assumptions, type rationale and offline lint; candidates only when suggestions are requested | skill contextual question design or MCP `design_questions` / `decompose_judgment`; no API call |
 | "Triage these support tickets into billing / technical / sales and flag the angry ones" | Atomic Choice / Score / Noul questions, linted; raw answers on a few of your tickets; accuracy per confidence band on your labelled rows; thresholds in one file with the measurement date; production code that calls the SDK | skill steps 1–9, `tenbin_evaluate`, `tenbin_evaluate_many` |
 | "Add a guardrail to our chatbot" | Input and output hazard batteries, a hazard → block / review / support map, severity that escalates a review, cookbook thresholds marked provisional until measured | `templates/guardrail.py` |
 | "Re-rank these 500 search results for this query" or "which of these 200 tools fits this turn?" | Scores per candidate from one Noul per pair, or a tournament of Choices, plus a "does anything fit at all" check | `tenbin_rank` |
@@ -27,7 +29,11 @@ Ask your coding agent for a judgment your code needs, and it comes back with a m
 
 Everything runs at design time. The output is code and numbers you own; production calls the TypeSafe SDK directly and never depends on the MCP.
 
-Without the MCP registered, the skill still designs, lints, evaluates and measures through `skills/tenbin/scripts/evaluate.py` (Python 3, no SDK); re-ranking and the taxonomy walk need the MCP. Without an API key, project-use suggestions, lint and cost estimates still work.
+Without the MCP registered, the skill still designs and generates code in the project,
+lints with `skills/tenbin/scripts/lint_questions.py`, and evaluates and measures through
+`skills/tenbin/scripts/evaluate.py` (Python 3, no SDK). Re-ranking and the taxonomy walk
+need the MCP. Without an API key, project-use suggestions, state/question and code
+generation, lint and cost estimates still work.
 
 ### Start with `tenbin`
 
@@ -43,6 +49,37 @@ no arguments and uses the current conversation and project; state any focus in t
 conversation first. The client controls how MCP prompts appear as commands. The prompt
 includes the shared `tenbin://guide/suggestions` guide and works without an API key.
 The shell executable `tenbin` continues to start the stdio MCP server.
+
+### Generate Jev integration code from project context
+
+Ask `/tenbin このプロジェクトに合うJev利用コードを設計・生成して`, optionally naming
+a feature or supplying sample input. The agent inspects the relevant project flow,
+types, dependencies and tests, then designs and implements a complete integration:
+state construction, linted questions, SDK calls, result interpretation, failure
+handling, application wiring and mocked tests. A design-only request stops at the
+concrete design. The host agent generates the code; the application calls Jev for
+typed judgments at runtime.
+
+With the MCP, select **`design_integration`**. Optional arguments are `context`, `goal`
+and `sample_state`, all strings. Direct MCP requests must include `arguments`, even
+when empty; `{}` uses only the host's current conversation and project:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"design_integration","arguments":{"goal":"Route support tickets using Jev in this project's existing service"}}}
+```
+
+For state and questions alone, ask `/tenbin 今の文脈からstateとquestionを生成して` or
+select **`design_questions`** with the same optional arguments. It returns a copyable
+`{state, questions}` request, field sources, assumptions and offline lint. It also
+supports suggestions only, or generating one part to match the supplied counterpart.
+`sample_state` accepts JSON encoded as a string or plain text. The existing
+`decompose_judgment` prompt shares this question-design workflow and now works offline.
+
+The argument-free `tenbin` prompt embeds both design guides and routes by the user's
+request. No TypeSafe key is needed for generation or mocked tests. Paid evaluation
+runs only when requested; model accuracy and thresholds remain unmeasured until
+validated on labelled data. See the [integration guide](tenbin/resources/integration-design.md)
+and [state/question guide](tenbin/resources/question-design.md) for the output contracts.
 
 ### A session in brief
 
@@ -86,7 +123,7 @@ make register-claude   # claude mcp add tenbin (registered via a wrapper that re
 make link-claude   # symlink ~/.claude/skills/tenbin → skills/tenbin (codex / agy: make link)
 ```
 
-The MCP starts without a key, with `tenbin_lint_questions`, the `tenbin` prompt, and guide/example resources available (offline mode). The skill works without registering the MCP: `skills/tenbin/scripts/evaluate.py` calls the API directly with the key from `~/.config/tenbin/env`. See Runbook §2 for passing the key directly via an environment variable and for other agents' configuration formats.
+The MCP starts without a key, with `tenbin_lint_questions`, the `tenbin`, `design_integration`, `design_questions` and `decompose_judgment` prompts, and guide/example resources available (offline mode). The skill works without registering the MCP: `skills/tenbin/scripts/evaluate.py` calls the API directly with the key from `~/.config/tenbin/env`. See Runbook §2 for passing the key directly via an environment variable and for other agents' configuration formats.
 
 Tell the agent "use the tenbin skill" to start with project-use suggestions, or supply a concrete judgment to proceed through: decompose → lint → evaluate a few samples → accuracy per band on labeled data → put thresholds in code. Production code calls the SDK directly, not the MCP.
 
@@ -108,7 +145,7 @@ key never lands in a shell rc file or in Claude's config. Plain environment vari
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TYPESAFE_API_KEY` | – | API key from https://console.typesafe.ai/settings/keys. Without it the MCP offers suggestions, lint, and resources offline |
+| `TYPESAFE_API_KEY` | – | API key from https://console.typesafe.ai/settings/keys. Without it the MCP offers suggestions, state/question and code generation, lint, and resources offline |
 | `TYPESAFE_DEFAULT_MODEL` | `jev-latest` | Model when a call omits `model`; pin `jev-1.13.0` while calibrating thresholds |
 | `TENBIN_MAX_TOKENS_PER_CALL` | `60000` | Estimated input tokens allowed per request (capped at the API's 64000) |
 | `TENBIN_SESSION_TOKEN_BUDGET` | `20000000` | Tokens one MCP process may spend (≈ $0.84); `BudgetExceededError` after that |

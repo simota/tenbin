@@ -6,6 +6,12 @@ not generated proposals. This is a proposal session: inspect relevant project co
 read-only, and do not call the TypeSafe API or modify files just to produce ideas.
 If the user already requested a specific implementation or evaluation, proceed with
 that task instead of making them choose it again.
+For a request to design or generate code using Jev, follow `tenbin://guide/integration-design`
+(skill `reference/integration-design.md`): generate state/questions, SDK integration,
+decision logic and tests in the project's conventions. For state/question suggestions
+or generation alone, use `tenbin://guide/question-design` (skill
+`reference/question-design.md`). The `tenbin` prompt embeds both guides. Do not stop
+at proposals when the user has already asked for generation or implementation.
 
 ## Establish the project's needs
 
@@ -57,9 +63,12 @@ available data, integration effort, and the consequence of a wrong decision. Eac
   State expected benefit qualitatively until measured; do not invent accuracy, savings, or thresholds.
 
 Finish with the best starting candidate, why it is the smallest useful experiment, and a
-copyable follow-up request to design or evaluate it. Stop at proposals unless further work
-was already requested. Detailed question design follows `decompose_judgment` or the skill's
-design procedure, starting with lint; do not run that procedure for every idea.
+copyable follow-up request, such as "Generate the Jev integration for the first proposal
+using this project's conventions, including state/questions and mocked tests."
+Stop at proposals unless further work was already requested. Use `design_integration`
+for project code or `design_questions` (also `decompose_judgment`) for state/questions
+alone; the skill uses the corresponding reference guide. Do not generate complete
+integrations for every idea during discovery.
 
 ## Available execution paths
 

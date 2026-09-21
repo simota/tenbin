@@ -10,12 +10,28 @@ Suggestions need neither an API key nor the MCP. A concrete implementation or
 evaluation request proceeds directly to the existing design procedure. The MCP's
 argument-free `tenbin` prompt provides the same discovery workflow.
 
+Ask `/tenbin このプロジェクトに合うJev利用コードを設計・生成して` to produce a
+working integration: state/questions, SDK calls, decision logic, failure handling,
+application wiring and mocked tests, following the project's existing conventions.
+The host agent writes code; the generated application uses Jev for runtime judgments.
+Generation and local verification need no TypeSafe API key; model accuracy and
+thresholds remain unmeasured until evaluated on labelled data.
+
+For state/questions alone, ask `/tenbin 今の文脈からstateとquestionを生成して`.
+The result is `{state, questions}` JSON with field sources, assumptions and offline lint.
+Suggestions-only and state-only/questions-only requests are also supported.
+The MCP equivalents are `design_integration` and `design_questions`, each with optional
+`context`, `goal` and `sample_state` strings (send `arguments: {}` for host context only).
+The existing `decompose_judgment` prompt uses the question-design workflow, also offline.
+
 ## Layout
 
 | Path | Content |
 |---|---|
 | `SKILL.md` | Triggers, discovery command, absolute rules, branching on MCP availability, the 9 steps, review checklist |
 | `reference/suggestions.md` | Project-use discovery: relevant evidence, capability matching, proposal output, offline fallback (synced from MCP resources) |
+| `reference/integration-design.md` | Project-specific Jev code design/generation, SDK integration, wiring and local verification (synced) |
+| `reference/question-design.md` | Contextual state/question suggestions and generation: sources, request JSON, assumptions and lint (synced) |
 | `reference/state.md` | 8 principles of state design (only required fields, object, path references, deterministic processing in code, language, limits, sample_uid) |
 | `reference/question-writing.md` | How to write instructions / criteria, with counterexamples |
 | `reference/thresholds.md` | Procedure for deriving thresholds from accuracy per band, and when not to use a threshold |

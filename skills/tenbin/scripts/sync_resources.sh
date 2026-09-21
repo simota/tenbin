@@ -6,7 +6,7 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 src="$here/../../../tenbin/resources"
 dst="$here/../reference"
-for f in primitives patterns confidence jaggedness cookbooks suggestions; do
+for f in primitives patterns confidence jaggedness cookbooks suggestions question-design integration-design; do
   cp "$src/$f.md" "$dst/$f.md"
   echo "synced $f.md"
 done
