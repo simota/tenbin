@@ -7,6 +7,7 @@ import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 const RESOURCE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "resources");
 
 const GUIDES: Record<string, string> = {
+  suggestions: "Suggest uses for Tenbin grounded in the current project: evidence, atomic judgments, integration points, and minimal validation",
   primitives: "Choice / Score / Noul: request shape, choosing a type, asking many questions at once, limits",
   confidence: "What confidence means, the three ranges, risk-scaled thresholds, what not to do",
   patterns: "Fan-out, confidence-gated routing, composite scoring, intent routing, two-stage, verification, guardrail",

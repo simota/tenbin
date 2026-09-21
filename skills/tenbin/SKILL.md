@@ -1,6 +1,6 @@
 ---
 name: tenbin
-description: "Judgments code makes from text: classify/route/triage, detect spam/abuse/injection, score severity/sentiment, rank, validate an extraction or LLM answer, escalate, thresholds, guardrails. Also tenbin, TypeSafe, Jev, Choice/Score/Noul, calibrated probability, prompting an LLM for a label, regex heuristics, classifier reliability. Not text generation."
+description: "Suggest Tenbin uses for the current project with /tenbin or requests for ideas. Design judgments code makes from text: classify/route/triage, detect spam/abuse/injection, score severity/sentiment, rank, validate an extraction or LLM answer, escalate, thresholds, guardrails. Also tenbin, TypeSafe, Jev, Choice/Score/Noul, calibrated probability, prompting an LLM for a label, regex heuristics, classifier reliability. Jev does not generate text."
 license: MIT
 ---
 
@@ -10,6 +10,21 @@ Jev answers typed questions (Choice / Score / Noul) about a `state` with calibra
 probabilities. It does not generate text, count, calculate or compare dates. This skill
 turns a broad decision into atomic questions, checks them, measures them on the user's
 data, and puts thresholds in code with evidence behind them.
+
+## `tenbin` command: suggest uses
+
+When invoked as `/tenbin` (or `$tenbin` in clients that use that notation) without a
+concrete task, or asked how Tenbin could help the current project, follow
+[reference/suggestions.md](reference/suggestions.md). Use any text after the command
+as the user's focus, then inspect the relevant project flow and propose grounded uses
+with integration points and a minimal trial. No API key or MCP connection is needed.
+Return proposals before entering the design procedure below; a bare invocation is not
+permission to run paid evaluations or implement every idea. A concrete design,
+evaluation, or implementation request goes directly to the relevant procedure.
+
+The MCP equivalent is the `tenbin` prompt, which takes no arguments and uses the
+current project and conversation. It includes the same guide, also served at
+`tenbin://guide/suggestions`. Either entry is sufficient; do not invoke both recursively.
 
 ## Absolute rules
 
@@ -25,14 +40,17 @@ data, and puts thresholds in code with evidence behind them.
 
 | | MCP server `tenbin` connected | No MCP |
 |---|---|---|
+| Suggest uses for this project | `tenbin` prompt, `tenbin://guide/suggestions` (also offline) | [reference/suggestions.md](reference/suggestions.md) |
 | Knowledge | `tenbin://guide/{primitives,patterns,confidence,jaggedness,cookbooks}` | `reference/*.md` (same content) |
 | Lint | `tenbin_lint_questions` | `python scripts/lint_questions.py questions.json [--state state.json]` |
 | Try a few inputs | `tenbin_evaluate` | `python scripts/evaluate.py request.json [--repeat 2]` |
 | Measure on labelled data | `tenbin_evaluate_many` → `design_thresholds` prompt | `python scripts/evaluate.py questions.json --rows rows.jsonl [--repeat 2]`, read its per-band table, then follow [reference/thresholds.md](reference/thresholds.md) |
 | Cost | `tenbin_session_stats` | `python scripts/estimate_cost.py` before; the `session` line of `evaluate.py` after |
 
-Detect the MCP by the presence of `tenbin_evaluate` in the tool list. Without it, run the
-scripts yourself: they need only Python 3 and the key in `TYPESAFE_API_KEY` or
+Detect API-enabled MCP execution by the presence of `tenbin_evaluate` in the tool list.
+An offline MCP still offers suggestions, resources, and `tenbin_lint_questions`.
+For a requested evaluation without `tenbin_evaluate`, run the scripts yourself:
+they need only Python 3 and the key in `TYPESAFE_API_KEY` or
 `~/.config/tenbin/env`. `evaluate.py` lints first and refuses on lint errors, like the MCP tool.
 If the key is missing, do not state measured numbers you did not obtain; say what the user
 must set (or run) to get them. `rows.jsonl` is one `{"state": ..., "labels": {"<id>": expected}}`

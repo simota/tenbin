@@ -26,7 +26,30 @@ Generic `mcpServers` entry:
 { "tenbin": { "command": "node", "args": ["/abs/path/tenbin/dist/index.js"], "env": { "TYPESAFE_API_KEY": "${TYPESAFE_API_KEY}" } } }
 ```
 
-Without `TYPESAFE_API_KEY` the server starts in offline mode and exposes only `tenbin_lint_questions`.
+Without `TYPESAFE_API_KEY` the server starts in offline mode and exposes `tenbin_lint_questions`, the `tenbin` prompt, and all guide/example resources.
+
+## `tenbin` command: project-use suggestions
+
+Select the `tenbin` prompt in the MCP client's prompt menu. It takes no arguments;
+state a focus in the conversation first if needed. The coding agent uses the current
+project and conversation to suggest grounded applications, including evidence,
+Choice / Score / Noul judgments, integration points, uncertainty handling, and a
+minimal validation plan. If project context is unavailable, it gives explicitly
+general examples and asks for a summary. It does not call TypeSafe or edit files.
+
+Example MCP request:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"tenbin"}}
+```
+
+The response is a user message containing the shared suggestions guide, current API
+availability, and instructions to use the current project. The host agent writes the
+proposals; the MCP server does not scan the client's repository. The guide is embedded
+so prompt-only clients do not need a second resource read. This works without a key.
+Command display names depend on the client; this is an MCP prompt, not a tool or a new
+shell subcommand. For the standalone skill, use `/tenbin` or `$tenbin` as supported by
+the host. After updating a running server, rebuild and restart the MCP client/session.
 
 ## Tools
 
@@ -40,8 +63,8 @@ Without `TYPESAFE_API_KEY` the server starts in offline mode and exposes only `t
 | `tenbin_list_models` | `GET /v1/models` + pricing | 1 call |
 | `tenbin_session_stats` | calls, tokens, cost, remaining budget | none |
 
-Resources: `tenbin://guide/{primitives,confidence,patterns,jaggedness,cookbooks}`, `tenbin://examples/{triage,guardrail,extraction}`.
-Prompts: `decompose_judgment`, `design_thresholds`, `review_typesafe_code`.
+Resources: `tenbin://guide/{suggestions,primitives,confidence,patterns,jaggedness,cookbooks}`, `tenbin://examples/{triage,guardrail,extraction}`.
+Prompts: `tenbin` (also offline), `decompose_judgment`, `design_thresholds`, `review_typesafe_code`.
 
 ## Configuration
 

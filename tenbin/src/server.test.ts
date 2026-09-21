@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { TypeSafeGateway } from "./client.js";
@@ -67,30 +68,66 @@ async function connect(env: Record<string, string>) {
 
 const KEY = { TYPESAFE_API_KEY: "test-key" };
 
-test("lists 7 tools, 5 guides + example template, 3 prompts", async () => {
+test("lists 7 tools, 6 guides + example template, 4 prompts", async () => {
   const { client, close } = await connect(KEY);
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
   assert.deepEqual(tools, ["tenbin_evaluate", "tenbin_evaluate_many", "tenbin_lint_questions", "tenbin_list_models", "tenbin_rank", "tenbin_session_stats", "tenbin_walk_taxonomy"]);
   const resources = (await client.listResources()).resources.map((r) => r.uri).sort();
   assert.ok(resources.includes("tenbin://guide/primitives"));
+  assert.ok(resources.includes("tenbin://guide/suggestions"));
+  assert.equal(resources.filter((uri) => uri.startsWith("tenbin://guide/")).length, 6);
   assert.ok(resources.includes("tenbin://examples/triage"));
   const guide = await client.readResource({ uri: "tenbin://guide/jaggedness" });
   assert.match(String((guide.contents[0] as { text: string }).text), /Literal reading/);
   const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
-  assert.deepEqual(prompts, ["decompose_judgment", "design_thresholds", "review_typesafe_code"]);
+  assert.deepEqual(prompts, ["decompose_judgment", "design_thresholds", "review_typesafe_code", "tenbin"]);
   const p = await client.getPrompt({ name: "decompose_judgment", arguments: { judgment: "route tickets" } });
   assert.match(String((p.messages[0].content as { text: string }).text), /route tickets/);
   await close();
 });
 
-test("offline mode exposes only the linter", async () => {
+test("offline mode exposes the linter, discovery prompt, and resources without API tools", async () => {
   const { client, close } = await connect({});
   const tools = (await client.listTools()).tools.map((t) => t.name);
   assert.deepEqual(tools, ["tenbin_lint_questions"]);
+  assert.deepEqual((await client.listPrompts()).prompts.map((p) => p.name), ["tenbin"]);
+  const resources = (await client.listResources()).resources.map((r) => r.uri);
+  assert.ok(resources.includes("tenbin://guide/suggestions"));
+  assert.ok(resources.includes("tenbin://examples/triage"));
+  const example = await client.readResource({ uri: "tenbin://examples/triage" });
+  const body = JSON.parse(String((example.contents[0] as { text: string }).text));
+  assert.ok(body.state);
+  assert.ok(body.questions);
   const r = await client.callTool({ name: "tenbin_lint_questions", arguments: { questions: { sev: { type: "score", instructions: "Rate severity from 0 to 2", criteria: ["0", "1", "2"] } } } });
   const sc = r.structuredContent as { warnings: { rule: string }[] };
   assert.ok(sc.warnings.some((w) => w.rule === "numeric_only_levels"));
   await close();
+});
+
+test("tenbin prompt shares the skill guide and opens without arguments or API calls", async (t) => {
+  for (const [mode, env] of [["online", KEY], ["offline", {}]] as const) {
+    await t.test(mode, async (t) => {
+      const { client, fake, close } = await connect(env);
+      t.after(close);
+      const resource = await client.readResource({ uri: "tenbin://guide/suggestions" });
+      const guide = String((resource.contents[0] as { text: string }).text);
+      const skillGuide = await readFile(new URL("../../skills/tenbin/reference/suggestions.md", import.meta.url), "utf8");
+      assert.equal(guide, skillGuide, "MCP and standalone skill use the same discovery workflow");
+
+      const listed = (await client.listPrompts()).prompts.find((p) => p.name === "tenbin");
+      assert.ok(listed);
+      assert.equal(listed.arguments, undefined);
+      const defaultPrompt = await client.getPrompt({ name: "tenbin" });
+      const defaultContent = defaultPrompt.messages[0].content;
+      assert.equal(defaultContent.type, "text");
+      if (defaultContent.type !== "text") throw new Error("Expected a text prompt");
+      assert.ok(defaultContent.text.startsWith(guide), "guide is embedded for prompt-only clients");
+      assert.equal(defaultContent.text.includes("This server is offline:"), mode === "offline");
+
+      assert.deepEqual(await client.getPrompt({ name: "tenbin", arguments: {} }), defaultPrompt);
+      assert.equal(fake.calls.length, 0, "discovery never calls TypeSafe, even with a configured key");
+    });
+  }
 });
 
 test("evaluate returns answers, cost and request id; lint errors block the call", async () => {

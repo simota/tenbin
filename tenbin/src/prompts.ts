@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
@@ -5,7 +6,31 @@ function user(text: string) {
   return { messages: [{ role: "user" as const, content: { type: "text" as const, text } }] };
 }
 
-export function registerPrompts(server: McpServer): void {
+export function registerPrompts(server: McpServer, apiAvailable: boolean): void {
+  server.registerPrompt(
+    "tenbin",
+    {
+      title: "Suggest Tenbin uses for the current project",
+      description: "Inspect the current project and conversation, then propose grounded uses for Tenbin with integration points and a minimal validation plan. Works without an API key; does not run evaluations or change files.",
+    },
+    async () => {
+      const guide = await readFile(new URL("../resources/suggestions.md", import.meta.url), "utf8");
+      return user(`${guide}
+
+## Current MCP availability
+
+${apiAvailable
+  ? "The API tools are registered. This command still makes no TypeSafe API calls; evaluation is a later step when requested."
+  : "This server is offline: only tenbin_lint_questions, this tenbin prompt, and guide/example resources are available. Proposal work needs no API key. Evaluation requires setting TYPESAFE_API_KEY and restarting the server, or using the skill's evaluate.py with a key."}
+
+## Project context
+
+Use the current project and conversation, including any focus the user has already stated. Follow the guide's fallback if that context is unavailable.`);
+    },
+  );
+
+  if (!apiAvailable) return;
+
   server.registerPrompt(
     "decompose_judgment",
     {

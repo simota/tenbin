@@ -71,7 +71,7 @@ env-file:
 	else mkdir -p "$$(dirname "$(ENV_FILE)")" && chmod 700 "$$(dirname "$(ENV_FILE)")" \
 	  && printf '# KEY=value, one per line. Required: TYPESAFE_API_KEY. Optional: TYPESAFE_DEFAULT_MODEL, TENBIN_*\nTYPESAFE_API_KEY=\n' > "$(ENV_FILE)" \
 	  && chmod 600 "$(ENV_FILE)" && echo "created $(ENV_FILE) — add your key (console.typesafe.ai/settings/keys)"; fi
-	@grep -q '^TYPESAFE_API_KEY=.\+' "$(ENV_FILE)" || echo "note    TYPESAFE_API_KEY is empty; the server will start in offline mode (lint only)"
+	@grep -q '^TYPESAFE_API_KEY=.\+' "$(ENV_FILE)" || echo "note    TYPESAFE_API_KEY is empty; the server will start in offline mode (suggestions, lint, and resources)"
 
 build-mcp:
 	cd $(MCP_DIR) && npm ci && npm run build

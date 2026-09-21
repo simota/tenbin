@@ -31,11 +31,11 @@ npm run build
 node dist/index.js        # "[tenbin] ready (model jev-latest)" on stderr means it worked. Ctrl-C to exit
 ```
 
-Without the key, the following appears and the server starts in **offline mode** (lint only):
+Without the key, the following appears and the server starts in **offline mode** (suggestions, lint, and resources):
 
 ```
 [tenbin] TYPESAFE_API_KEY is not set. ...
-[tenbin] Starting in offline mode: only tenbin_lint_questions is available.
+[tenbin] Starting in offline mode: tenbin_lint_questions, the tenbin prompt, and guide/example resources are available.
 ```
 
 ### 2.2 Storing the key (the `~/.config/tenbin/env` approach)
@@ -106,7 +106,10 @@ make link-claude    # Claude Code, personal (~/.claude/skills/tenbin -> skills/t
 # or copy the whole directory into .claude/skills/tenbin/ inside the project
 ```
 
-Check: tell the agent "use the tenbin skill" and it returns a decomposition that follows the absolute rules (question IDs are not sent, all questions in one call, computation in code).
+Check: invoke `/tenbin` (or `$tenbin` where supported) and it proposes uses grounded in
+the current project, with evidence and a first trial. For a concrete judgment request,
+it returns a decomposition that follows the absolute rules (question IDs are not sent,
+all questions in one call, computation in code).
 
 ### 2.5 Environment variables (optional)
 
@@ -123,6 +126,27 @@ Positive integers only. An invalid value is a startup error.
 ---
 
 ## 3. Daily operation
+
+### 3.0 Find a use in the current project
+
+Use the skill's `/tenbin`, optionally with a focus such as
+`/tenbin 問い合わせ対応を中心に`. With the MCP alone, select the `tenbin` prompt in the
+client's prompt menu; it takes no arguments and uses the current conversation and
+project. State a focus in the conversation first. Prompt display names vary by client.
+
+The equivalent MCP request is
+`{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"tenbin"}}`.
+It returns a user message containing the shared guide and API availability. The host
+agent reads relevant project files and proposes use cases with evidence, input and
+judgment type, integration point, uncertainty handling, and a minimal trial. Without
+project access, it labels general examples and asks for context. No TypeSafe API call
+or file change is made for suggestions; no key is required.
+
+Choose a proposal (or use its copyable follow-up request) to start §3.1. If the original
+request already specified implementation or evaluation, the agent proceeds directly.
+After updating an installed MCP, run `npm run build` in `tenbin/` and restart the
+MCP client/session. Check that `prompts/list` contains `tenbin` and the prompt opens
+without arguments, including offline.
 
 ### 3.1 Design session (skill steps 1–9)
 
@@ -165,7 +189,7 @@ First look at stderr (the client's MCP log) and `tenbin_session_stats`. Error me
 
 | Symptom | Cause | Action |
 |---|---|---|
-| Only `tenbin_lint_questions` in the tool list | Started offline without a key | Set `TYPESAFE_API_KEY` and restart the MCP (restart the client). With the env-file approach, check that `~/.config/tenbin/env` exists, its permissions, and the `KEY=value` format |
+| Only `tenbin_lint_questions` in the tool list | Started offline without a key; the `tenbin` prompt and resources remain available | For evaluation, set `TYPESAFE_API_KEY` and restart the MCP (restart the client). With the env-file approach, check that `~/.config/tenbin/env` exists, its permissions, and the `KEY=value` format |
 | `TypeSafe rejected the API key (401)` | Key invalid or revoked | Issue a new key in the Console and update the environment variable. `evaluate_many` stops on 401/403 and marks the remaining rows `skipped` |
 | `rejected the request body (422)` | Invalid criteria format, level count or option count | Run the same questions through `tenbin_lint_questions`. If lint passes and you still get 422, suspect a SDK / API discrepancy and check against the official API reference (https://docs.typesafe.ai/api) |
 | `Rate limited (429) after the SDK's automatic retries` | Too much concurrency | Lower `TENBIN_CONCURRENCY` (4 -> 2), or lower it with the tool's `concurrency` argument. Split the batch |

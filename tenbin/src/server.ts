@@ -22,6 +22,9 @@ export function createServer(config: Config, gateway: TypeSafeGateway | null): M
     annotations: LOCAL,
   }, makeLint(config.maxTokensPerCall));
 
+  registerResources(server);
+  registerPrompts(server, gateway !== null);
+
   if (!gateway) return server;
 
   server.registerTool("tenbin_evaluate", {
@@ -66,7 +69,5 @@ export function createServer(config: Config, gateway: TypeSafeGateway | null): M
     annotations: LOCAL,
   }, makeSessionStats(gateway));
 
-  registerResources(server);
-  registerPrompts(server);
   return server;
 }

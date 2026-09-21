@@ -2,11 +2,20 @@
 
 A TypeSafe (System One / Jev) design skill for coding agents. [SKILL.md](SKILL.md) defines the procedure for decomposing a judgment into atomic Choice / Score / Noul questions, then lint → trial → measure on labeled data → put thresholds in code. Execution goes through the [tenbin](../../tenbin/) MCP, or, where no MCP is available, `scripts/evaluate.py` (standard library only, run directly by the agent).
 
+Invoke `/tenbin` (or `$tenbin` where supported) to propose uses that fit the current
+project. A focus can follow the command, for example `/tenbin 検索機能を中心に`.
+The agent inspects relevant files read-only and gives evidence, input and judgment
+types, integration points, and a minimal trial, then recommends where to start.
+Suggestions need neither an API key nor the MCP. A concrete implementation or
+evaluation request proceeds directly to the existing design procedure. The MCP's
+argument-free `tenbin` prompt provides the same discovery workflow.
+
 ## Layout
 
 | Path | Content |
 |---|---|
-| `SKILL.md` | Triggers, absolute rules, branching on MCP availability, the 9 steps, review checklist |
+| `SKILL.md` | Triggers, discovery command, absolute rules, branching on MCP availability, the 9 steps, review checklist |
+| `reference/suggestions.md` | Project-use discovery: relevant evidence, capability matching, proposal output, offline fallback (synced from MCP resources) |
 | `reference/state.md` | 8 principles of state design (only required fields, object, path references, deterministic processing in code, language, limits, sample_uid) |
 | `reference/question-writing.md` | How to write instructions / criteria, with counterexamples |
 | `reference/thresholds.md` | Procedure for deriving thresholds from accuracy per band, and when not to use a threshold |

@@ -9,7 +9,7 @@ let gateway: TypeSafeGateway | null = null;
 try {
   gateway = new TypeSafeGateway(config);
 } catch (err) {
-  console.error(`[tenbin] ${err instanceof Error ? err.message : err}\n[tenbin] Starting in offline mode: only tenbin_lint_questions is available.`);
+  console.error(`[tenbin] ${err instanceof Error ? err.message : err}\n[tenbin] Starting in offline mode: tenbin_lint_questions, the tenbin prompt, and guide/example resources are available.`);
 }
 
 const server = createServer(config, gateway);
