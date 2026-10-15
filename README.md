@@ -108,7 +108,7 @@ and [state/question guide](tenbin/resources/question-design.md) for the output c
 
 ## Quick start
 
-Prerequisites: Node.js 20 or later, a TypeSafe API key (https://console.typesafe.ai/settings/keys).
+Prerequisites: Node.js 22 or later, a TypeSafe API key (https://console.typesafe.ai/settings/keys).
 
 ```sh
 git clone <this repo> && cd tenbin

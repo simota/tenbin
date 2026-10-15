@@ -8,7 +8,7 @@ Audience: people using `tenbin` (stdio MCP) and `skills/tenbin` (Agent Skill). T
 
 | Item | Requirement | Check |
 |---|---|---|
-| Node.js | 20 or later | `node -v` |
+| Node.js | 22 or later | `node -v` |
 | Python | 3.10 or later (only for the skill's scripts / templates; not needed for the MCP) | `python3 --version` |
 | API key | Issued at https://console.typesafe.ai/settings/keys. **Passed only via the `TYPESAFE_API_KEY` environment variable** | `test -n "$TYPESAFE_API_KEY" && echo ok` |
 | Network | HTTPS to `api.typesafe.ai` | `curl -sS -o /dev/null -w '%{http_code}\n' https://api.typesafe.ai/v1/models -H "Authorization: Bearer $TYPESAFE_API_KEY"` -> `200` |

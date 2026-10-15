@@ -12,7 +12,7 @@
 
 ## Build, test and local development
 
-Use Node.js 20 or later and run the following after `cd tenbin`.
+Use Node.js 22 or later and run the following after `cd tenbin`.
 
 | Command | Purpose |
 | --- | --- |

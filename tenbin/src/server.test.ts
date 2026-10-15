@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { zstdDecompressSync } from "node:zlib";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { TypeSafeGateway } from "./client.js";
@@ -8,6 +9,18 @@ import { loadConfig } from "./config.js";
 import { createServer } from "./server.js";
 import { makeEvaluateMany } from "./tools/evaluate_many.js";
 import { questionsSchema, stateSchema } from "./schemas.js";
+
+/** The JSON request and any multipart file parts, undoing the SDK's zstd compression. */
+async function decodeRequest(init: RequestInit | undefined): Promise<{ body: any; form: FormData | undefined }> {
+  if (!init?.body) return { body: undefined, form: undefined };
+  const headers = new Headers(init.headers);
+  let raw = new Uint8Array(await new Response(init.body).arrayBuffer());
+  if (headers.get("content-encoding") === "zstd") raw = new Uint8Array(zstdDecompressSync(raw));
+  const contentType = headers.get("content-type") ?? "";
+  if (!contentType.startsWith("multipart/form-data")) return { body: JSON.parse(new TextDecoder().decode(raw)), form: undefined };
+  const form = await new Response(raw, { headers: { "content-type": contentType } }).formData();
+  return { body: JSON.parse(await (form.get("request") as Blob).text()), form };
+}
 
 /** Fake TypeSafe API: deterministic answers derived from the request. */
 function fakeFetch(): { fetch: typeof fetch; calls: { url: string; body: any }[]; maxInflight: () => number } {
@@ -18,7 +31,7 @@ function fakeFetch(): { fetch: typeof fetch; calls: { url: string; body: any }[]
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "x-typesafe-request-id": `req-${calls.length}` } });
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    const { body } = await decodeRequest(init);
     calls.push({ url, body });
     inflight += 1;
     peak = Math.max(peak, inflight);
