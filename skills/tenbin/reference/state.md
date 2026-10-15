@@ -25,9 +25,12 @@ State, How to build, Jaggedness, Models pages and the cookbooks named below.
    - Compute numbers, dates and counts in code and pass the result, or a named bucket.
    - Enumerate candidates in code (regex for emails, amounts, dates; BM25 shortlist; taxonomy
      children) and put them in the state so the model *selects* instead of generating.
-7. **Text only, English best.** Convert images, audio, video and binaries to text or structured
-   fields. Non-English state (including Japanese) is accepted with lower accuracy: measure on
-   your own rows and lean on confidence when routing.
+7. **Text and images, English best.** PNG/JPEG images are accepted as an experimental Danger Zone
+   feature (`TypeSafe-Danger-Zone-Images: true`; see `primitives.md`): label each image with a
+   field name (`{"door": "<door>"}`), send it upright and at most 1568 px on its longest side, and
+   put an image several questions use in the state once. Convert audio, video and other binaries
+   to text or structured fields. Non-English state (including Japanese) is accepted with lower
+   accuracy: measure on your own rows and lean on confidence when routing.
 8. **Limits and repeat runs.** State + all questions ≤ 64k tokens, state + longest question ≤ 32k
    (≈ 150k English characters). Estimate with `scripts/estimate_cost.py`. For repeated
    evaluations of the same state add a distinct `sample_uid` field so runs are independent

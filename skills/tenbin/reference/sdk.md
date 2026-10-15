@@ -49,7 +49,32 @@ r.answers.urgency.score;
 ```
 
 `systemOne(...).withResponse()` gives `{ data, response, requestId }`; `RequestOptions`
-accepts `signal`, `timeout`, `retry`. Answer types are inferred from the question helpers.
+accepts `signal`, `timeout`, `retry`, `headers`. Answer types are inferred from the question helpers.
+JS SDK 0.7 needs Node.js 22 and compresses bodies of 1 KiB or more with zstd (`compression: false`
+turns it off).
+
+## Images and Box (experimental, SDK ≥ 0.7)
+
+```ts
+import { openAsBlob } from "node:fs";
+import { box, image, noul, TypeSafeClient } from "@typesafe-ai/sdk";
+
+const photo = image(await openAsBlob("kitchen.jpg"));      // or Image.fromBase64(upload)
+const { answers } = await client.systemOne(
+  {
+    state: { photo },                                        // the SDK writes a reference for it
+    questions: { mug_visible: noul("Is there a coffee mug in `photo`?"), mug: box("the coffee mug in `photo`") },
+    model: "jev-preview",                                    // Box needs Jev 1.14
+  },
+  { headers: { "TypeSafe-Danger-Zone-Images": "true" } },    // every request with an image or a Box
+);
+const { top, bottom, left, right } = answers.mug.box;      // fractions; ignore when mug_visible is low
+```
+
+Python: `Image(Path("kitchen.jpg"))` (also bytes, `Image.from_base64`, `Image.from_pil`), `Box(...)`,
+`attach_assets` for images inside text, `extra_headers={"TypeSafe-Danger-Zone-Images": "true"}`.
+Use `withAssets` / `withAssets.join` (JS) to put images inside a sentence. Prepare images in code:
+PNG/JPEG, upright pixels, longest side ≤ 1568 px.
 
 ## Naming
 

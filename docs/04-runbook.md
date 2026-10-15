@@ -230,6 +230,7 @@ Compare with the previous accuracy-per-band table. If accuracy in the automation
 - `rank`: over 255 candidates / over the token cap is batched automatically with a final round. Add `existence_check` to also detect "no match".
 - `walk_taxonomy`: chunked automatically per level. Lowering `subtree_token_limit` summarizes the descriptions.
 - `evaluate_many`: above 500 states, split into multiple calls.
+- Images (experimental): resize the longest side to ≤ 1568 px and rotate the pixels upright before passing `assets`; put an image several questions use in `state` once. Each image reserves `IMAGE_TOKENS_PER_USE` (provisional) per use against the per-call and session budgets.
 
 ---
 
@@ -247,6 +248,9 @@ First look at stderr (the client's MCP log) and `tenbin_session_stats`. Error me
 | `state + longest question ... exceeds the API limit of 32000` | One question is huge (long option descriptions) | Shorten the option descriptions, lower `subtree_token_limit` in `walk_taxonomy` |
 | `session token budget ... would be exceeded` | Budget consumed | Raise `TENBIN_SESSION_TOKEN_BUDGET` and restart, or start a new session. In-flight calls count as reservations |
 | `Request cancelled by the client.` / `cancelled` in rows | Interrupted on the agent side | Normal. Re-run to continue (results are not retained) |
+| `asset "...": ... is not a PNG or JPEG file` / `path must be absolute` / `cannot read` | The `assets` path points at another format, a relative path, or a missing file | Convert GIF / WebP / HEIC to PNG or JPEG; pass an absolute path the MCP server's machine can read |
+| `TypeSafe API error 400` / `413` on a request with images | Image below 256 px or above 1568 px per side, not PNG/JPEG, damaged, an asset not referenced, or over 32 MiB in total | Follow the hint in the message; re-export the file as baseline JPEG or PNG; send fewer or smaller images |
+| `Box questions need Jev 1.14` | Box sent to `jev-latest` / `jev-1.13.0` | Pass `model: "jev-preview"` (or `jev-1.14.0`) |
 | `Could not reach api.typesafe.ai` | Network / proxy | Check connectivity with the curl in §1. In a sandbox, allow the host |
 | `TypeSafe API error 5xx` | API-side outage | Wait a few minutes and retry (the SDK backs off exponentially on 5xx / 529 automatically). If it persists, check the official announcements and sales@typesafe.ai |
 | Client disconnects the MCP with a JSON parse error | Diagnostics leaked into stdout | Revert any change that uses `console.log`. Diagnostics always go through `console.error`. `server.test.ts` detects SDK logs leaking into stdout but not your own `console.log`, so confirm stdout is empty with `node dist/index.js </dev/null \| head` |

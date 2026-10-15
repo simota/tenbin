@@ -102,7 +102,8 @@ input: {
   state: string | object | array,
   questions: Record<string, Question>,       // same JSON shape as the API. Mixing types is fine
   model?: string,                            // default TYPESAFE_DEFAULT_MODEL -> jev-latest
-  include_usage?: boolean                    // default true
+  include_usage?: boolean,                   // default true
+  assets?: Record<string, { path: string }>  // images (experimental), reference -> absolute PNG/JPEG path
 }
 output: {
   model: string,
@@ -116,6 +117,7 @@ output: {
 ```
 
 - Before the call, the same checks as `tenbin_lint_questions` run automatically. **Errors are rejected; warnings are attached in `warnings`** and the call proceeds.
+- Images follow the API's own shape: `assets` maps a reference to a file, and the reference is written where the image belongs in `state`, `instructions` or `criteria`. The gateway reads the file (PNG/JPEG signature only, so a path cannot upload another local file), passes it to the SDK, which sends multipart, and adds `TypeSafe-Danger-Zone-Images: true` only when the call has an image or a Box question. Box (Jev 1.14) is a fourth question type; lint blocks it on models before 1.14 and without an image. Design record: [05-image-support-plan.md](05-image-support-plan.md).
 - Example Markdown output:
 
 ```

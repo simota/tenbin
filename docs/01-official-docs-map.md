@@ -10,6 +10,7 @@ here: the condensed rules a coding agent needs while designing, served by the sk
 |---|---|---|
 | What System One / Jev is, RLCD, state basics | introduction, concepts/system-one, concepts/state, introduction/machine-learning-primer | `README.md` "TypeSafe in one minute"; `skills/tenbin/reference/state.md` |
 | Choice / Score / Noul, request shape, limits | primitives, primitives/{choice,score,noul,advanced} | `reference/primitives.md` (= `tenbin://guide/primitives`), `reference/question-writing.md` (structured instructions, levels, criteria) |
+| Images and Box (experimental, Danger Zone header) | images, primitives/box, sdk/javascript/api/functions/{image,box}, sdk/python/api/types/assets | `reference/primitives.md` "Images"; `tenbin/README.md` Tools; [05-image-support-plan.md](05-image-support-plan.md) |
 | Confidence and thresholds | confidence, patterns/confidence-routing | `reference/confidence.md`, `reference/thresholds.md` |
 | Patterns (fan-out, composite, intent routing, two-stage, verification, guardrail) | patterns/* , demos/smart-home | `reference/patterns.md`; diagrams in [02-workflows.md](02-workflows.md) |
 | How to build a workflow, use-case map | concepts/how-to-build-with-system-one, concepts/use-case-map | `skills/tenbin/SKILL.md` steps 1–9; [02-workflows.md](02-workflows.md) |
@@ -24,7 +25,8 @@ here: the condensed rules a coding agent needs while designing, served by the sk
 ```
 introduction/            Introduction, Quick start, AI primer
 concepts/                System One, State, How to build, Use case map
-primitives/              Choice, Score, Noul, Advanced: structure
+primitives/              Choice, Score, Noul, Box, Advanced: structure
+images
 confidence
 patterns/                fan-out, confidence-routing, composite-scoring, intent-routing
 demos/                   smart-home

@@ -96,13 +96,19 @@ until measured on labelled data.
 
 | tool | what | API |
 |---|---|---|
-| `tenbin_lint_questions` | static checks: level/option counts, numeric-only or degree-only levels, compound / counting / date instructions, inverted Noul criteria, missing state paths, token budget | none |
-| `tenbin_evaluate` | one state × many questions; lint first (errors block, warnings returned); answers + usage + cost + request id + latency | 1 call |
-| `tenbin_evaluate_many` | N states × same questions, concurrent; `repeat` for self-consistency; per-question mean/std, choice histogram | N×repeat calls |
+| `tenbin_lint_questions` | static checks: level/option counts, numeric-only or degree-only levels, compound / counting / date instructions, inverted Noul criteria, Box criteria and model (`model`), image references (`assets`), missing state paths, token budget | none |
+| `tenbin_evaluate` | one state × many questions; lint first (errors block, warnings returned); answers + usage + cost + request id + latency. Images (experimental): `assets: {"<photo>": {"path": "/abs/photo.jpg"}}`, the reference written where the image belongs; Box questions need `model: "jev-preview"` | 1 call |
+| `tenbin_evaluate_many` | N states × same questions, concurrent; `repeat` for self-consistency; per-question mean/std, choice histogram, box edges; shared `assets` plus per-row `states[].assets` | N×repeat calls |
 | `tenbin_rank` | query × candidates → scores (noul fan-out, or Choice whose scores keep the final round's order between batch winners, keep losers below their own winner, and sum to 1); auto-batches past the token budget / 255-option cap, including the final rounds; optional `existence_check`. Design-time tool: noul mode packs many candidates into one state (the rerank cookbook sends one request per pair and measured its numbers that way; see jaggedness #5), and the cross-batch score combination is tenbin's own heuristic, not from a cookbook | ≥1 call |
 | `tenbin_walk_taxonomy` | nested tree, one Choice per level with subtrees as option descriptions, beam search; levels over 255 options or the token budget are chunked and merged through a final round; a level with a single child is taken without a call and adds no edge to the path score (cookbook `is_decision`) | ≤1 call per level |
 | `tenbin_list_models` | `GET /v1/models` + pricing | 1 call |
 | `tenbin_session_stats` | calls, tokens, cost, remaining budget | none |
+
+Images: the server reads each absolute path itself, refuses anything that is not PNG or JPEG,
+and sends `TypeSafe-Danger-Zone-Images: true` only on calls with images or Box. Limits (256–1568 px
+per side, 32 MiB) are the API's; pixels must already be upright. The per-image token reservation
+(`IMAGE_TOKENS_PER_USE` in `src/config.ts`) is provisional until TypeSafe publishes an estimate.
+`tenbin_rank` and `tenbin_walk_taxonomy` are text-only.
 
 Resources: `tenbin://guide/{suggestions,integration-design,question-design,primitives,confidence,patterns,jaggedness,cookbooks}`, `tenbin://examples/{triage,guardrail,extraction}`.
 Prompts: `tenbin`, `design_integration`, `design_questions`, `decompose_judgment` (all also offline), `design_thresholds`, `review_typesafe_code`.
