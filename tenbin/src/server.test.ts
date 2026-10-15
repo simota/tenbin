@@ -35,7 +35,10 @@ function fakeFetch(): { fetch: typeof fetch; calls: { url: string; body: any }[]
     calls.push({ url, body });
     inflight += 1;
     peak = Math.max(peak, inflight);
-    await new Promise((r) => setTimeout(r, 2));
+    // A 422 is a validation failure the API answers before evaluating, so it skips the delay. That
+    // keeps "the failure arrives first" true now that the SDK compresses bodies off-thread and
+    // requests can reach the fake out of order.
+    if (!JSON.stringify(body?.state ?? null).includes("FAIL422")) await new Promise((r) => setTimeout(r, 2));
     inflight -= 1;
     if (url.endsWith("/v1/models")) return json({ models: [{ name: "jev-latest", description: "latest", release_date: "2026-09-01" }] });
     if (!url.endsWith("/v1/systemone")) return json({ error: "not found" }, 404);
