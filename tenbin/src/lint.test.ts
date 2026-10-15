@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { lintQuestions, resolvePath } from "./lint.js";
+import { boxModelSupport, lintQuestions, resolvePath } from "./lint.js";
 import type { Questions } from "./types.js";
 
 const rules = (r: ReturnType<typeof lintQuestions>) => [...r.errors, ...r.warnings, ...r.infos].map((f) => f.rule);
@@ -116,4 +116,30 @@ test("forbidden field names and paths in the state are errors", () => {
   const exact = lintQuestions({ q: { type: "noul", instructions: "Does `customer.email` look like a company address?" } }, state, undefined, ["customer.payment"]);
   assert.equal(exact.errors.length, 1);
   assert.equal(lintQuestions({ q: { type: "noul", instructions: "Does `customer.email` look like a company address?" } }, state).errors.length, 0, "no list, no error");
+});
+
+test("box questions: criteria is an error, the model is checked only when given, a presence Noul is suggested", () => {
+  const box = { type: "box", instructions: "the coffee mug in `photo`" } as const;
+  const withCriteria = lintQuestions({ mug: { ...box, criteria: { a: "b" } } as never }, { photo: "x" });
+  assert.ok(withCriteria.errors.some((f) => f.rule === "box_criteria"));
+
+  const ruleSeverity = (model?: string) => {
+    const r = lintQuestions({ mug: box }, { photo: "x" }, undefined, [], model === undefined ? {} : { model });
+    return [...r.errors, ...r.warnings].filter((f) => f.rule === "box_model").map((f) => f.severity);
+  };
+  assert.deepEqual(ruleSeverity("jev-1.13.0"), ["error"]);
+  assert.deepEqual(ruleSeverity("jev-latest"), ["warning"]);
+  assert.deepEqual(ruleSeverity("jev-preview"), []);
+  assert.deepEqual(ruleSeverity(undefined), []);
+
+  assert.ok(lintQuestions({ mug: box }, { photo: "x" }).infos.some((f) => f.rule === "box_without_presence_check"));
+  const paired = lintQuestions({ mug: box, mug_visible: { type: "noul", instructions: "Is there a coffee mug in `photo`?" } }, { photo: "x" });
+  assert.ok(!paired.infos.some((f) => f.rule === "box_without_presence_check"));
+});
+
+test("boxModelSupport reads Jev versions and leaves unknown names to the API", () => {
+  assert.deepEqual(
+    ["jev-preview", "jev-1.14.0", "jev-1.15.2", "jev-2.0.0", "jev-1.13.0", "jev-1.9.0", "jev-latest", "custom"].map(boxModelSupport),
+    ["yes", "yes", "yes", "yes", "no", "no", "alias", "unknown"],
+  );
 });

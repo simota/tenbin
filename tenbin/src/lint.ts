@@ -100,6 +100,25 @@ export function forbiddenStatePaths(state: unknown, forbidden: string[]): string
   return [...hits];
 }
 
+export interface LintOptions {
+  /** The model the request will name; Box questions are checked against it when given. */
+  model?: string;
+}
+
+/**
+ * Whether a model can answer Box questions: Jev 1.14 and later. `jev-latest` is "alias" because it
+ * pointed at 1.13 when Box shipped (2026-10-14) and moves on its own; unrecognised names are
+ * "unknown" and left to the API.
+ */
+export function boxModelSupport(model: string): "yes" | "no" | "alias" | "unknown" {
+  if (model === "jev-preview") return "yes";
+  if (model === "jev-latest") return "alias";
+  const m = /^jev-(\d+)\.(\d+)/.exec(model);
+  if (!m) return "unknown";
+  const [major, minor] = [Number(m[1]), Number(m[2])];
+  return major > 1 || (major === 1 && minor >= 14) ? "yes" : "no";
+}
+
 export function resolvePath(state: unknown, path: string): boolean {
   const parts = path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
   let cur: unknown = state;
@@ -117,12 +136,16 @@ export function resolvePath(state: unknown, path: string): boolean {
   return true;
 }
 
-function lintQuestion(id: string, q: Question, state: unknown, push: (f: Omit<Finding, "question_id">) => void): void {
+function lintQuestion(id: string, q: Question, state: unknown, options: LintOptions, push: (f: Omit<Finding, "question_id">) => void): void {
   const instr = text(q.instructions);
 
-  if (!q.type || !["noul", "choice", "score"].includes(q.type)) {
-    push({ rule: "unknown_type", severity: "error", message: `type must be noul, choice or score (got ${JSON.stringify((q as { type?: unknown }).type)})`, fix: "Set type to one of the three primitives." });
+  if (!q.type || !["noul", "choice", "score", "box"].includes(q.type)) {
+    push({ rule: "unknown_type", severity: "error", message: `type must be noul, choice, score or box (got ${JSON.stringify((q as { type?: unknown }).type)})`, fix: "Set type to one of the four question types." });
     return;
+  }
+
+  if (q.type === "box" && "criteria" in q && (q as { criteria?: unknown }).criteria != null) {
+    push({ rule: "box_criteria", severity: "error", message: "Box questions take no criteria", fix: "Describe the target in instructions, e.g. \"the coffee mug in `photo`\"; ask a separate Choice or Noul for anything else." });
   }
 
   if (q.type === "score") {
@@ -151,6 +174,15 @@ function lintQuestion(id: string, q: Question, state: unknown, push: (f: Omit<Fi
       push({ rule: "choice_options_range", severity: "error", message: `Choice criteria must be a map of 1–${API_LIMITS.maxChoiceOptions} options (got ${opts ? opts.length : typeof q.criteria})`, fix: "Provide a map of option name to description (or null). Split >255 options into two stages." });
     } else if (!opts.some((o) => OTHER_OPTION.test(o))) {
       push({ rule: "no_other_option", severity: "info", message: "No 'other' / 'none of the above' option", fix: "Add one if the list might not cover every input, so the model can say nothing fits." });
+    }
+  }
+
+  if (q.type === "box" && options.model !== undefined) {
+    const support = boxModelSupport(options.model);
+    if (support === "no") {
+      push({ rule: "box_model", severity: "error", message: `Box questions need Jev 1.14 or later; model is ${options.model}`, fix: "Set model to jev-preview or jev-1.14.0." });
+    } else if (support === "alias") {
+      push({ rule: "box_model", severity: "warning", message: "jev-latest pointed at Jev 1.13, which cannot answer Box questions, when Box shipped", fix: "Set model to jev-preview or jev-1.14.0." });
     }
   }
 
@@ -192,14 +224,18 @@ function lintQuestion(id: string, q: Question, state: unknown, push: (f: Omit<Fi
   }
 }
 
-export function lintQuestions(questions: Questions, state?: unknown, maxTokensPerCall: number = API_LIMITS.totalTokens, forbidden: string[] = []): LintResult {
+export function lintQuestions(questions: Questions, state?: unknown, maxTokensPerCall: number = API_LIMITS.totalTokens, forbidden: string[] = [], options: LintOptions = {}): LintResult {
   const findings: Finding[] = [];
   const ids = Object.keys(questions);
   if (ids.length === 0) {
     findings.push({ question_id: "", rule: "no_questions", severity: "error", message: "questions is empty", fix: "Add at least one question." });
   }
   for (const id of ids) {
-    lintQuestion(id, questions[id] as Question, state, (f) => findings.push({ question_id: id, ...f }));
+    lintQuestion(id, questions[id] as Question, state, options, (f) => findings.push({ question_id: id, ...f }));
+  }
+  const types = ids.map((id) => (questions[id] as Question).type);
+  if (types.includes("box") && !types.includes("noul")) {
+    findings.push({ question_id: "", rule: "box_without_presence_check", severity: "info", message: "A Box answer is always a box, even when the target is absent", fix: "Ask a Noul such as \"Is there a coffee mug in `photo`?\" in the same request and ignore the box when it is low." });
   }
 
   if (state !== undefined) {

@@ -20,6 +20,11 @@ export const questionSchema = z.discriminatedUnion("type", [
     instructions,
     criteria: z.array(entryType).describe("Ordered array of 2–10 level descriptions, low to high"),
   }),
+  // strict: Box takes no criteria, and silently dropping one would hide the mistake.
+  z.object({
+    type: z.literal("box"),
+    instructions: instructions.describe("What to find and in which image, e.g. \"the coffee mug in `photo`\". Needs model jev-preview (Jev 1.14). Experimental."),
+  }).strict(),
 ]);
 
 export const questionsSchema = z.record(z.string(), questionSchema).describe("Map of question id -> question. Mix types freely; all are evaluated in parallel against the same state.");

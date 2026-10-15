@@ -15,7 +15,12 @@ export interface ScoreQuestion {
   instructions: EntryType;
   criteria: EntryType[];
 }
-export type Question = NoulQuestion | ChoiceQuestion | ScoreQuestion;
+/** Locates what the instructions describe in the request's image; needs Jev 1.14 (`jev-preview`). */
+export interface BoxQuestion {
+  type: "box";
+  instructions: EntryType;
+}
+export type Question = NoulQuestion | ChoiceQuestion | ScoreQuestion | BoxQuestion;
 export type Questions = Record<string, Question>;
 
 export interface NoulAnswer {
@@ -35,7 +40,13 @@ export interface ScoreAnswer {
   legend: Record<string, unknown>;
   probabilities: Record<string, number>;
 }
-export type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer;
+/** Edges as fractions of the image's width (left, right) and height (top, bottom), from the top-left corner. */
+export interface BoxAnswer {
+  type: "box";
+  box: { top: number; bottom: number; left: number; right: number };
+  confidence: number | null;
+}
+export type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer | BoxAnswer;
 
 export interface Usage {
   input_tokens: number;

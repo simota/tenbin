@@ -46,6 +46,15 @@ export function summarize(rows: Row[], questions: Questions) {
       const conf: number[] = [];
       for (const a of answers) if (a.type === "choice") { hist[a.choice] = (hist[a.choice] ?? 0) + 1; conf.push(a.confidence); }
       per[qid] = { type: "choice", choice_histogram: hist, confidence: stats(conf) };
+    } else if (q.type === "box") {
+      const edges = { top: [] as number[], bottom: [] as number[], left: [] as number[], right: [] as number[] };
+      const conf: number[] = [];
+      for (const a of answers) {
+        if (a.type !== "box") continue;
+        for (const edge of ["top", "bottom", "left", "right"] as const) edges[edge].push(a.box[edge]);
+        if (a.confidence !== null) conf.push(a.confidence);
+      }
+      per[qid] = { type: "box", top: stats(edges.top), bottom: stats(edges.bottom), left: stats(edges.left), right: stats(edges.right), confidence: stats(conf) };
     } else {
       const score: number[] = [];
       const conf: number[] = [];
@@ -68,10 +77,11 @@ export function makeEvaluateMany(gateway: TypeSafeGateway, maxTokensPerCall: num
     const prepare = (state: unknown, id: string, k: number) => (args.repeat > 1 ? withSampleUid(state, `${id}-${k}`) : state);
     // Shared questions are validated once, without a state, so a single oversized state cannot
     // block the batch: per-state size limits are enforced by the gateway and land in that row's error.
-    const { blocked } = lintWarnings(args.questions, undefined, maxTokensPerCall);
+    const model = args.model ?? gateway.defaultModel;
+    const { blocked } = lintWarnings(args.questions, undefined, maxTokensPerCall, model);
     if (blocked.length) return errorResult(`questions rejected by lint:\n- ${blocked.join("\n- ")}`);
     const largest = args.states.reduce((a, b) => (JSON.stringify(a.state).length >= JSON.stringify(b.state).length ? a : b));
-    const { warnings } = lintWarnings(args.questions, prepare(largest.state, largest.id, 0), maxTokensPerCall);
+    const { warnings } = lintWarnings(args.questions, prepare(largest.state, largest.id, 0), maxTokensPerCall, model);
 
     const jobs = args.states.flatMap((s) => Array.from({ length: args.repeat }, (_, k) => ({ id: s.id, sample: k, state: prepare(s.state, s.id, k) })));
     const started = Date.now();

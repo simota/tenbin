@@ -3,9 +3,9 @@
 
 Mirrors the rules of tenbin (src/lint.ts). Usage:
 
-    python lint_questions.py questions.json [--state state.json] [--max-tokens 64000] [--forbidden cardNumber,customer.ssn]
+    python lint_questions.py questions.json [--state state.json] [--max-tokens 64000] [--forbidden cardNumber,customer.ssn] [--model jev-preview]
 
-questions.json is either {"<id>": {...}} or {"state": ..., "questions": {...}}.
+questions.json is either {"<id>": {...}} or {"state": ..., "questions": {...}} (optionally with "model").
 Exit code 1 when any error is found.
 """
 from __future__ import annotations
@@ -38,6 +38,20 @@ DOUBLE_NEG = re.compile(r"\b(not un\w+|doesn't fail to|does not fail to|isn't no
 NEGATION_START = re.compile(r"^\s*(no|not|never|none|doesn't|does not|isn't|is not|lacks|without)\b", re.I)
 OTHER_OPTION = re.compile(r"^(other|none|none_of_the_above|none of the above|unknown|not_stated|not stated|n/a|unclear)$", re.I)
 PATH = re.compile(r"`([A-Za-z_][\w.\[\]-]*)`")
+JEV_VERSION = re.compile(r"^jev-(\d+)\.(\d+)")
+
+
+def box_model_support(model: str) -> str:
+    """Jev 1.14+ answers Box. jev-latest pointed at 1.13 when Box shipped (2026-10-14) and moves on its own."""
+    if model == "jev-preview":
+        return "yes"
+    if model == "jev-latest":
+        return "alias"
+    m = JEV_VERSION.match(model)
+    if not m:
+        return "unknown"
+    major, minor = int(m.group(1)), int(m.group(2))
+    return "yes" if major > 1 or (major == 1 and minor >= 14) else "no"
 
 
 def criterion_text(v: Any) -> str:
@@ -128,7 +142,8 @@ def forbidden_state_paths(state: Any, forbidden: list[str]) -> list[str]:
     return list(hits)
 
 
-def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_TOKENS, forbidden: list[str] | None = None) -> dict[str, Any]:
+def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_TOKENS, forbidden: list[str] | None = None,
+         model: str | None = None) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
 
     def push(qid: str, rule: str, sev: str, msg: str, fix: str) -> None:
@@ -139,11 +154,22 @@ def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_T
 
     for qid, q in questions.items():
         qtype = q.get("type") if isinstance(q, dict) else None
-        if qtype not in ("noul", "choice", "score"):
-            push(qid, "unknown_type", "error", f"type must be noul, choice or score (got {qtype!r})", "Set type to one of the three primitives.")
+        if qtype not in ("noul", "choice", "score", "box"):
+            push(qid, "unknown_type", "error", f"type must be noul, choice, score or box (got {qtype!r})", "Set type to one of the four question types.")
             continue
         instr = text(q.get("instructions"))
         crit = q.get("criteria")
+
+        if qtype == "box" and crit is not None:
+            push(qid, "box_criteria", "error", "Box questions take no criteria",
+                 'Describe the target in instructions, e.g. "the coffee mug in `photo`"; ask a separate Choice or Noul for anything else.')
+        if qtype == "box" and model is not None:
+            support = box_model_support(model)
+            if support == "no":
+                push(qid, "box_model", "error", f"Box questions need Jev 1.14 or later; model is {model}", "Set model to jev-preview or jev-1.14.0.")
+            elif support == "alias":
+                push(qid, "box_model", "warning", "jev-latest pointed at Jev 1.13, which cannot answer Box questions, when Box shipped",
+                     "Set model to jev-preview or jev-1.14.0.")
 
         if qtype == "score":
             levels = crit if isinstance(crit, list) else None
@@ -210,6 +236,11 @@ def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_T
                     push(qid, "state_path_missing", "warning", f"path `{path}` referenced in instructions does not exist in state or in the instructions object",
                          "Fix the path or add the field to state.")
 
+    types = [q.get("type") for q in questions.values() if isinstance(q, dict)]
+    if "box" in types and "noul" not in types:
+        push("", "box_without_presence_check", "info", "A Box answer is always a box, even when the target is absent",
+             'Ask a Noul such as "Is there a coffee mug in `photo`?" in the same request and ignore the box when it is low.')
+
     if state is not None:
         for path in forbidden_state_paths(state, forbidden or []):
             push("", "state_path_forbidden", "error", f"state contains forbidden path `{path}`",
@@ -251,19 +282,21 @@ def main() -> int:
     ap.add_argument("--state", help="JSON file with the state (overrides an embedded one)")
     ap.add_argument("--max-tokens", type=int, default=TOTAL_TOKENS)
     ap.add_argument("--forbidden", default="", help="comma-separated field names or dot-paths the state must not contain")
+    ap.add_argument("--model", help="model the request will name; Box questions are checked against it (overrides an embedded one)")
     args = ap.parse_args()
 
     with open(args.questions, encoding="utf-8") as fh:
         doc = json.load(fh)
     state = None
+    model = None
     questions = doc
     if isinstance(doc, dict) and "questions" in doc and isinstance(doc["questions"], dict) and "type" not in doc:
-        questions, state = doc["questions"], doc.get("state")
+        questions, state, model = doc["questions"], doc.get("state"), doc.get("model")
     if args.state:
         with open(args.state, encoding="utf-8") as fh:
             state = json.load(fh)
 
-    result = lint(questions, state, args.max_tokens, [f for f in args.forbidden.split(",") if f])
+    result = lint(questions, state, args.max_tokens, [f for f in args.forbidden.split(",") if f], args.model or model)
     json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
     print()
     return 1 if result["errors"] else 0

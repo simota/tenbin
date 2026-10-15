@@ -10,11 +10,12 @@ export const lintInput = {
   questions: questionsSchema,
   state: stateSchema.optional().describe("If given, backticked paths in instructions are checked against it, fields no question references are reported, and the token budget is estimated"),
   forbidden: z.array(z.string()).optional().describe("Field names or dot-paths the state must not contain (e.g. [\"cardNumber\", \"customer.ssn\"]); a match is an error"),
+  model: z.string().optional().describe("The model the request will name; if given, Box questions are checked against it (Box needs jev-preview / Jev 1.14)"),
 };
 
 export function makeLint(maxTokensPerCall: number) {
-  return async (args: { questions: Questions; state?: unknown; forbidden?: string[] }) => {
-    const r = lintQuestions(args.questions, args.state, maxTokensPerCall, args.forbidden ?? []);
+  return async (args: { questions: Questions; state?: unknown; forbidden?: string[]; model?: string }) => {
+    const r = lintQuestions(args.questions, args.state, maxTokensPerCall, args.forbidden ?? [], args.model === undefined ? {} : { model: args.model });
     return toolResult({ ...r, ok: r.errors.length === 0 });
   };
 }

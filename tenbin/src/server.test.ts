@@ -54,6 +54,8 @@ function fakeFetch(): { fetch: typeof fetch; calls: { url: string; body: any }[]
         const winner = opts.find((o) => new RegExp(`\\b${o.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(stateText)) ?? opts[0];
         for (const o of opts) probabilities[o] = opts.length === 1 ? 1 : o === winner ? 0.7 : 0.3 / (opts.length - 1);
         answers[id] = { type: "choice", choice: winner, confidence: 0.6, probabilities };
+      } else if (q.type === "box") {
+        answers[id] = { type: "box", box: { top: 0.25, bottom: 0.82, left: 0.44, right: 0.84 }, confidence: 0.92 };
       } else {
         const n = q.criteria.length;
         const probabilities: Record<string, number> = {};
@@ -257,6 +259,30 @@ test("evaluate returns answers, cost and request id; lint errors block the call"
   assert.equal(bad.isError, true);
   assert.match(String((bad.content as any)[0].text), /score_levels_range|2–10 levels/);
   assert.equal(fake.calls.length, 1, "no API call when lint fails");
+  await close();
+});
+
+test("box questions: schema refuses criteria, evaluate_many summarises edges and confidence", async () => {
+  assert.equal(questionsSchema.safeParse({ b: { type: "box", instructions: "the mug in `photo`", criteria: { x: "y" } } }).success, false);
+  const { client, fake, close } = await connect(KEY);
+  const r = await client.callTool({
+    name: "tenbin_evaluate_many",
+    arguments: {
+      states: [{ id: "a", state: { photo: "kitchen" } }, { id: "b", state: { photo: "office" } }],
+      questions: { mug_visible: { type: "noul", instructions: "Is there a coffee mug in `photo`?" }, mug: { type: "box", instructions: "the coffee mug in `photo`" } },
+      model: "jev-preview",
+    },
+  });
+  assert.equal(r.isError, undefined);
+  const mug = (r.structuredContent as any).summary.per_question.mug;
+  assert.equal(mug.type, "box");
+  assert.deepEqual([mug.top.mean, mug.right.mean, mug.confidence.mean, mug.confidence.n], [0.25, 0.84, 0.92, 2]);
+  assert.equal(fake.calls[0].body.model, "jev-preview");
+
+  const old = await client.callTool({ name: "tenbin_evaluate", arguments: { state: { photo: "x" }, questions: { mug: { type: "box", instructions: "the coffee mug in `photo`" } }, model: "jev-1.13.0" } });
+  assert.equal(old.isError, true);
+  assert.match(String((old.content as any)[0].text), /Jev 1\.14/);
+  assert.equal(fake.calls.length, 2, "no API call for a Box on a model that cannot answer it");
   await close();
 });
 

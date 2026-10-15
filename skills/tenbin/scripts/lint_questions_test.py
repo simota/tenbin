@@ -121,5 +121,28 @@ class StateFields(unittest.TestCase):
         self.assertEqual(lint(q, state)["errors"], [])
 
 
+class BoxQuestions(unittest.TestCase):
+    BOX = {"type": "box", "instructions": "the coffee mug in `photo`"}
+
+    def box_model_severities(self, model):
+        r = lint({"mug": self.BOX}, {"photo": "x"}, model=model)
+        return [f["severity"] for f in r["errors"] + r["warnings"] if f["rule"] == "box_model"]
+
+    def test_criteria_is_an_error(self):
+        r = lint({"mug": {**self.BOX, "criteria": {"a": "b"}}}, {"photo": "x"})
+        self.assertIn(("error", "mug", "box_criteria"), rules(r))
+
+    def test_model_is_checked_only_when_given(self):
+        self.assertEqual(self.box_model_severities("jev-1.13.0"), ["error"])
+        self.assertEqual(self.box_model_severities("jev-latest"), ["warning"])
+        self.assertEqual(self.box_model_severities("jev-preview"), [])
+        self.assertEqual(self.box_model_severities(None), [])
+
+    def test_presence_noul_is_suggested(self):
+        self.assertIn(("info", "", "box_without_presence_check"), rules(lint({"mug": self.BOX}, {"photo": "x"})))
+        paired = lint({"mug": self.BOX, "mug_visible": {"type": "noul", "instructions": "Is there a coffee mug in `photo`?"}}, {"photo": "x"})
+        self.assertNotIn("box_without_presence_check", {rule for _, _, rule in rules(paired)})
+
+
 if __name__ == "__main__":
     unittest.main()

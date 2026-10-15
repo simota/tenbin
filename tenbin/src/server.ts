@@ -17,7 +17,7 @@ export function createServer(config: Config, gateway: TypeSafeGateway | null): M
 
   server.registerTool("tenbin_lint_questions", {
     title: "Lint TypeSafe questions (offline)",
-    description: "Static checks on a questions map without calling the API: level/option counts, numeric-only or degree-only levels, compound or counting/date instructions, inverted Noul criteria, missing state paths, state fields no question uses, forbidden state paths, token budget. Run before tenbin_evaluate.",
+    description: "Static checks on a questions map without calling the API: level/option counts, numeric-only or degree-only levels, compound or counting/date instructions, inverted Noul criteria, Box criteria and model, missing state paths, state fields no question uses, forbidden state paths, token budget. Run before tenbin_evaluate.",
     inputSchema: lintInput,
     annotations: LOCAL,
   }, makeLint(config.maxTokensPerCall));
@@ -29,7 +29,7 @@ export function createServer(config: Config, gateway: TypeSafeGateway | null): M
 
   server.registerTool("tenbin_evaluate", {
     title: "Evaluate one state with many questions",
-    description: "POST /v1/systemone: evaluate a state against a map of Choice/Score/Noul questions in one call. Put every question that uses this state here, including speculative ones. Questions are linted first; errors block, warnings are returned alongside answers. Returns answers, usage, cost_usd, request_id, latency_ms.",
+    description: "POST /v1/systemone: evaluate a state against a map of Choice/Score/Noul/Box questions in one call. Box (experimental) needs model jev-preview. Put every question that uses this state here, including speculative ones. Questions are linted first; errors block, warnings are returned alongside answers. Returns answers, usage, cost_usd, request_id, latency_ms.",
     inputSchema: evaluateInput,
     annotations: READ_ONLY,
   }, makeEvaluate(gateway, config.maxTokensPerCall));
