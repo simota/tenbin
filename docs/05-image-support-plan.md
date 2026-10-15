@@ -125,6 +125,8 @@ Each step is one commit and leaves the suite green.
 
 ## What would make this wrong
 
+The first two risks were checked against the real API on 2026-10-15; see "Measured" below.
+
 - **Image token cost.** If one image costs far more than `IMAGE_TOKENS_PER_USE`, the per-call
   guard lets oversized calls through (the API then returns `400 max_tokens_exceeded`, which is
   handled) and the session budget under-reserves. Check: one real call with one 1568x1176 JPEG and
@@ -133,3 +135,30 @@ Each step is one commit and leaves the suite green.
   proves it is sent.
 - **Path visibility.** If an MCP client runs the server where the agent's paths do not exist
   (remote or containerised), path input fails; the tool then returns the read error per asset.
+
+## Measured (2026-10-15, real API)
+
+Synthetic images (a red rectangle at left 0.30, top 0.20, right 0.60, bottom 0.50 on white), one call
+per condition, no repeats. The images and request files were generated in a scratch directory and
+are not in the repository.
+
+| Check | Result |
+|---|---|
+| Image tokens per use | ≈ width × height / 390, identical on jev-1.13.0 / jev-1.14.0 and PNG / JPEG: 280×280 +202, 800×600 +1,278, 1568×1176 +4,706 (text-only base 288) |
+| Box, 1568×1176 and 800×600 | left 0.30–0.31, top 0.19, right 0.61, bottom 0.51–0.52; confidence 0.93–0.95; presence Noul 0.97 |
+| Box, 280×280 (minimum size) | left 0.25, top 0.13, right 0.62, bottom 0.47; confidence 0.80; presence Noul 0.74 |
+| No `TypeSafe-Danger-Zone-Images` header | 400 "Images are experimental. Send the header ..." |
+| Context limit | 6 uses of a 1568×1176 image = 28,571 tokens, accepted; 7 uses → clean 400 `max_tokens_exceeded` |
+| Paths | `evaluate.py` (base64 JSON) and the MCP gateway (multipart + zstd) gave the same token count |
+
+What this does and does not establish:
+
+- The integration works end to end on both paths, and the risks below are resolved: the image-token
+  cost was not a constant (the removed 3,300 under-reserved the largest size), and the header is
+  sent through `RequestOptions.headers`.
+- Error messages were checked on the `evaluate.py` path only; the MCP path was run on success only.
+- Box accuracy here is the easiest possible case. It says nothing about real photos (clutter,
+  small targets, several similar objects), and small images were visibly worse. Measure on labelled
+  images of the actual use case (`evaluate.py --rows` with `--repeat`) before relying on it.
+- Whether the over-context 400 is billed is not observable from the API (no usage in the error).
+

@@ -230,7 +230,7 @@ Compare with the previous accuracy-per-band table. If accuracy in the automation
 - `rank`: over 255 candidates / over the token cap is batched automatically with a final round. Add `existence_check` to also detect "no match".
 - `walk_taxonomy`: chunked automatically per level. Lowering `subtree_token_limit` summarizes the descriptions.
 - `evaluate_many`: above 500 states, split into multiple calls.
-- Images (experimental): resize the longest side to ≤ 1568 px and rotate the pixels upright before passing `assets`; put an image several questions use in `state` once. Image tokens are not estimated before the call: lint's token budget and the per-call guard count text only, the API answers an over-context request with `400 max_tokens_exceeded`, and the session budget counts actual usage after each call.
+- Images (experimental): resize the longest side to ≤ 1568 px and rotate the pixels upright before passing `assets`; put an image several questions use in `state` once. Image tokens are not estimated before the call: lint's token budget and the per-call guard count text only, the API answers an over-context request with `400 max_tokens_exceeded`, and the session budget counts actual usage after each call. Measured cost (unofficial): about width × height / 390 tokens per use, so roughly six 1568×1176 uses fit the 32k state + question limit. Box was accurate on large synthetic images and visibly worse at the 280×280 minimum; measure on your own labelled images before relying on it.
 
 ---
 
@@ -252,6 +252,7 @@ First look at stderr (the client's MCP log) and `tenbin_session_stats`. Error me
 | `TypeSafe API error 400` / `413` on a request with images | Image below 256 px or above 1568 px per side, not PNG/JPEG, damaged, an asset not referenced, or over 32 MiB in total | Follow the hint in the message; re-export the file as baseline JPEG or PNG; send fewer or smaller images |
 | `Box questions need Jev 1.14` | Box sent to `jev-latest` / `jev-1.13.0` | Pass `model: "jev-preview"` (or `jev-1.14.0`) |
 | `Could not reach api.typesafe.ai` | Network / proxy | Check connectivity with the curl in §1. In a sandbox, allow the host |
+| `getaddrinfo ENOTFOUND api.typesafe.ai` from the MCP server or a Node script, while `evaluate.py` works | Node's `fetch` ignores the sandbox's proxy variables, so DNS fails inside a network-filtering sandbox (seen 2026-10-15 with Claude Code's sandbox) | Run the Node process outside the sandbox, or use `evaluate.py` (Python honours the proxy) |
 | `TypeSafe API error 5xx` | API-side outage | Wait a few minutes and retry (the SDK backs off exponentially on 5xx / 529 automatically). If it persists, check the official announcements and sales@typesafe.ai |
 | Client disconnects the MCP with a JSON parse error | Diagnostics leaked into stdout | Revert any change that uses `console.log`. Diagnostics always go through `console.error`. `server.test.ts` detects SDK logs leaking into stdout but not your own `console.log`, so confirm stdout is empty with `node dist/index.js </dev/null \| head` |
 | `EPERM` / cache write failure in `npm ci` | Sandbox denies `~/.npm` | `npm_config_cache=$TMPDIR/npm-cache npm ci` |
