@@ -1,7 +1,7 @@
 import { describeError, type TypeSafeGateway } from "../client.js";
 import { errorResult, toolResult } from "../format.js";
 import { lintQuestions } from "../lint.js";
-import { questionsSchema, stateSchema } from "../schemas.js";
+import { assetsSchema, questionsSchema, stateSchema } from "../schemas.js";
 import { PRICE_PER_MTOK_USD } from "../config.js";
 import { z } from "zod";
 import type { Questions } from "../types.js";
@@ -11,11 +11,15 @@ export const lintInput = {
   state: stateSchema.optional().describe("If given, backticked paths in instructions are checked against it, fields no question references are reported, and the token budget is estimated"),
   forbidden: z.array(z.string()).optional().describe("Field names or dot-paths the state must not contain (e.g. [\"cardNumber\", \"customer.ssn\"]); a match is an error"),
   model: z.string().optional().describe("The model the request will name; if given, Box questions are checked against it (Box needs jev-preview / Jev 1.14)"),
+  assets: assetsSchema.optional().describe("The images the request will send; if given, references are checked against state and questions (files are not read)"),
 };
 
 export function makeLint(maxTokensPerCall: number) {
-  return async (args: { questions: Questions; state?: unknown; forbidden?: string[]; model?: string }) => {
-    const r = lintQuestions(args.questions, args.state, maxTokensPerCall, args.forbidden ?? [], args.model === undefined ? {} : { model: args.model });
+  return async (args: { questions: Questions; state?: unknown; forbidden?: string[]; model?: string; assets?: Record<string, unknown> }) => {
+    const r = lintQuestions(args.questions, args.state, maxTokensPerCall, args.forbidden ?? [], {
+      ...(args.model === undefined ? {} : { model: args.model }),
+      ...(args.assets === undefined ? {} : { assets: Object.keys(args.assets) }),
+    });
     return toolResult({ ...r, ok: r.errors.length === 0 });
   };
 }

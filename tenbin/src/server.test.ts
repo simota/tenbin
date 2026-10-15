@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { zstdDecompressSync } from "node:zlib";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -19,20 +21,22 @@ async function decodeRequest(init: RequestInit | undefined): Promise<{ body: any
   const contentType = headers.get("content-type") ?? "";
   if (!contentType.startsWith("multipart/form-data")) return { body: JSON.parse(new TextDecoder().decode(raw)), form: undefined };
   const form = await new Response(raw, { headers: { "content-type": contentType } }).formData();
-  return { body: JSON.parse(await (form.get("request") as Blob).text()), form };
+  return { body: JSON.parse(String(form.get("request"))), form };
 }
 
 /** Fake TypeSafe API: deterministic answers derived from the request. */
-function fakeFetch(): { fetch: typeof fetch; calls: { url: string; body: any }[]; maxInflight: () => number } {
-  const calls: { url: string; body: any }[] = [];
+interface FakeCall { url: string; body: any; headers: Headers; form: FormData | undefined }
+
+function fakeFetch(): { fetch: typeof fetch; calls: FakeCall[]; maxInflight: () => number } {
+  const calls: FakeCall[] = [];
   let inflight = 0;
   let peak = 0;
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "x-typesafe-request-id": `req-${calls.length}` } });
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const { body } = await decodeRequest(init);
-    calls.push({ url, body });
+    const { body, form } = await decodeRequest(init);
+    calls.push({ url, body, headers: new Headers(init?.headers), form });
     inflight += 1;
     peak = Math.max(peak, inflight);
     // A 422 is a validation failure the API answers before evaluating, so it skips the delay. That
@@ -86,6 +90,20 @@ async function connect(env: Record<string, string>) {
 }
 
 const KEY = { TYPESAFE_API_KEY: "test-key" };
+
+const PNG = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3);
+const JPEG = Uint8Array.of(0xff, 0xd8, 0xff, 0xe0, 4, 5, 6);
+
+/** Writes image-signature files (not decodable images: the fake API never decodes them). */
+async function imageFiles(files: Record<string, Uint8Array>): Promise<Record<string, string>> {
+  const dir = await mkdtemp(join(tmpdir(), "tenbin-test-"));
+  const out: Record<string, string> = {};
+  for (const [name, bytes] of Object.entries(files)) {
+    out[name] = join(dir, name);
+    await writeFile(out[name], bytes);
+  }
+  return out;
+}
 
 test("lists 7 tools, 8 guides + example template, 6 prompts", async () => {
   const { client, close } = await connect(KEY);
@@ -268,10 +286,14 @@ test("evaluate returns answers, cost and request id; lint errors block the call"
 test("box questions: schema refuses criteria, evaluate_many summarises edges and confidence", async () => {
   assert.equal(questionsSchema.safeParse({ b: { type: "box", instructions: "the mug in `photo`", criteria: { x: "y" } } }).success, false);
   const { client, fake, close } = await connect(KEY);
+  const files = await imageFiles({ "kitchen.png": PNG, "office.jpg": JPEG });
   const r = await client.callTool({
     name: "tenbin_evaluate_many",
     arguments: {
-      states: [{ id: "a", state: { photo: "kitchen" } }, { id: "b", state: { photo: "office" } }],
+      states: [
+        { id: "a", state: { photo: "<kitchen>" }, assets: { "<kitchen>": { path: files["kitchen.png"] } } },
+        { id: "b", state: { photo: "<office>" }, assets: { "<office>": { path: files["office.jpg"] } } },
+      ],
       questions: { mug_visible: { type: "noul", instructions: "Is there a coffee mug in `photo`?" }, mug: { type: "box", instructions: "the coffee mug in `photo`" } },
       model: "jev-preview",
     },
@@ -282,10 +304,86 @@ test("box questions: schema refuses criteria, evaluate_many summarises edges and
   assert.deepEqual([mug.top.mean, mug.right.mean, mug.confidence.mean, mug.confidence.n], [0.25, 0.84, 0.92, 2]);
   assert.equal(fake.calls[0].body.model, "jev-preview");
 
-  const old = await client.callTool({ name: "tenbin_evaluate", arguments: { state: { photo: "x" }, questions: { mug: { type: "box", instructions: "the coffee mug in `photo`" } }, model: "jev-1.13.0" } });
+  const old = await client.callTool({ name: "tenbin_evaluate", arguments: { state: { photo: "<kitchen>" }, assets: { "<kitchen>": { path: files["kitchen.png"] } }, questions: { mug: { type: "box", instructions: "the coffee mug in `photo`" } }, model: "jev-1.13.0" } });
   assert.equal(old.isError, true);
   assert.match(String((old.content as any)[0].text), /Jev 1\.14/);
   assert.equal(fake.calls.length, 2, "no API call for a Box on a model that cannot answer it");
+  await close();
+});
+
+test("evaluate sends images as multipart parts with the Danger Zone header; text-only calls stay plain", async () => {
+  const { client, fake, close } = await connect(KEY);
+  const files = await imageFiles({ "door.jpg": JPEG, "badge.png": PNG });
+  const r = await client.callTool({
+    name: "tenbin_evaluate",
+    arguments: {
+      state: { door: "<door>" },
+      assets: { "<door>": { path: files["door.jpg"] }, "<badge>": { path: files["badge.png"] } },
+      questions: { same_person: { type: "noul", instructions: "Is the person in `door` the person in this badge photo: <badge>?" } },
+    },
+  });
+  assert.equal(r.isError, undefined, String((r.content as any)[0].text));
+  assert.ok((r.structuredContent as any).warnings.some((w: string) => w.startsWith("[experimental]")));
+  const call = fake.calls[0];
+  assert.equal(call.headers.get("TypeSafe-Danger-Zone-Images"), "true");
+  assert.deepEqual(Object.keys(call.body.assets).sort(), ["<badge>", "<door>"]);
+  const doorPart = call.form?.get(call.body.assets["<door>"].part) as Blob;
+  assert.deepEqual(new Uint8Array(await doorPart.arrayBuffer()), JPEG, "the file is sent as is");
+  assert.equal(call.body.state.door, "<door>", "the reference stays in the state");
+
+  await client.callTool({ name: "tenbin_evaluate", arguments: { state: "hello", questions: { q: { type: "noul", instructions: "Does the message greet someone?" } } } });
+  assert.equal(fake.calls[1].headers.get("TypeSafe-Danger-Zone-Images"), null);
+  assert.equal(fake.calls[1].form, undefined);
+  await close();
+});
+
+test("evaluate refuses non-image files, relative paths and unreferenced assets before any API call", async () => {
+  const { client, fake, close } = await connect(KEY);
+  const files = await imageFiles({ "notes.txt": new TextEncoder().encode("secret notes"), "door.jpg": JPEG });
+  const call = (assets: Record<string, { path: string }>, state: unknown = { door: "<door>" }) =>
+    client.callTool({ name: "tenbin_evaluate", arguments: { state, assets, questions: { q: { type: "noul", instructions: "Is there a person in `door`?" } } } });
+
+  const text = (r: Awaited<ReturnType<typeof call>>) => String((r.content as any)[0].text);
+  const notImage = await call({ "<door>": { path: files["notes.txt"] } });
+  assert.equal(notImage.isError, true);
+  assert.match(text(notImage), /not a PNG or JPEG/);
+  const relative = await call({ "<door>": { path: "door.jpg" } });
+  assert.match(text(relative), /must be absolute/);
+  const missing = await call({ "<door>": { path: join(tmpdir(), "no-such-tenbin-image.jpg") } });
+  assert.match(text(missing), /cannot read/);
+  const unreferenced = await call({ "<door>": { path: files["door.jpg"] }, "<extra>": { path: files["door.jpg"] } });
+  assert.match(text(unreferenced), /<extra>.*not referenced/);
+  assert.equal(fake.calls.length, 0);
+  await close();
+});
+
+test("evaluate_many merges shared and per-row assets; a row with an unreferenced asset fails alone", async () => {
+  const { client, fake, close } = await connect(KEY);
+  const files = await imageFiles({ "thumb.png": PNG, "cam1.jpg": JPEG, "cam2.jpg": JPEG });
+  const questions = { gesture: { type: "choice", instructions: "Which gesture is the hand in `camera` making?", criteria: { thumbs_up: "<thumb>", none: "No hand, or another gesture." } } };
+  const r = await client.callTool({
+    name: "tenbin_evaluate_many",
+    arguments: {
+      assets: { "<thumb>": { path: files["thumb.png"] } },
+      states: [
+        { id: "ok", state: { camera: "<cam1>" }, assets: { "<cam1>": { path: files["cam1.jpg"] } } },
+        { id: "typo", state: { camera: "<cam-2>" }, assets: { "<cam2>": { path: files["cam2.jpg"] } } },
+      ],
+      questions,
+    },
+  });
+  const sc = r.structuredContent as any;
+  assert.equal(fake.calls.length, 1, "the broken row makes no API call");
+  assert.deepEqual(Object.keys(fake.calls[0].body.assets).sort(), ["<cam1>", "<thumb>"]);
+  assert.deepEqual(sc.summary.failures.map((f: any) => f.id), ["typo"]);
+  assert.match(sc.summary.failures[0].error, /<cam2>.*not referenced/);
+
+  const clash = await client.callTool({
+    name: "tenbin_evaluate_many",
+    arguments: { assets: { "<thumb>": { path: files["thumb.png"] } }, states: [{ id: "a", state: { camera: "<thumb>" }, assets: { "<thumb>": { path: files["cam1.jpg"] } } }], questions },
+  });
+  assert.equal(clash.isError, true);
+  assert.match(String((clash.content as any)[0].text), /both in assets and in states\[\]\.assets/);
   await close();
 });
 

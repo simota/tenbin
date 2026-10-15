@@ -29,5 +29,9 @@ export const questionSchema = z.discriminatedUnion("type", [
 
 export const questionsSchema = z.record(z.string(), questionSchema).describe("Map of question id -> question. Mix types freely; all are evaluated in parallel against the same state.");
 
+export const assetsSchema = z
+  .record(z.string().min(1), z.object({ path: z.string().min(1).describe("Absolute path of a PNG or JPEG file") }).strict())
+  .describe("Images (experimental): reference -> {path}. Write the reference where the image belongs in state, instructions or criteria, e.g. state {\"photo\": \"<photo>\"} with assets {\"<photo>\": {\"path\": \"/abs/door.jpg\"}}. Use delimited references such as <photo> or a UUID; they match as plain text. 256–1568 px per side, upright pixels (EXIF orientation is not applied).");
+
 export const stateSchema = z.union([z.string(), z.record(z.string(), z.unknown()), z.array(z.unknown())]).describe("Content to evaluate: a string, a JSON object (preferred; name each part), or an array.");
 

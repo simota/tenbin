@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lint_questions import lint  # noqa: E402
+from lint_questions import IMAGE_TOKENS_PER_USE, lint, lint_assets  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -142,6 +142,38 @@ class BoxQuestions(unittest.TestCase):
         self.assertIn(("info", "", "box_without_presence_check"), rules(lint({"mug": self.BOX}, {"photo": "x"})))
         paired = lint({"mug": self.BOX, "mug_visible": {"type": "noul", "instructions": "Is there a coffee mug in `photo`?"}}, {"photo": "x"})
         self.assertNotIn("box_without_presence_check", {rule for _, _, rule in rules(paired)})
+
+    def test_box_needs_an_image_when_assets_are_known(self):
+        self.assertIn(("error", "mug", "box_without_image"), rules(lint({"mug": self.BOX}, {"photo": "a kitchen"}, assets=[])))
+        self.assertNotIn("box_without_image", {rule for _, _, rule in rules(lint({"mug": self.BOX}, {"photo": "a kitchen"}))})
+
+
+class AssetReferences(unittest.TestCase):
+    NOUL = {"type": "noul", "instructions": "Is there a person in `door`?"}
+
+    def asset_rules(self, questions, state, assets):
+        return [f"{f['severity']}:{f['rule']}" for f in lint_assets(questions, state, assets)]
+
+    def test_same_findings_as_the_mcp(self):
+        q = {"q": self.NOUL}
+        self.assertEqual(self.asset_rules(q, {"door": "<door>"}, ["<door>"]), [])
+        self.assertEqual(self.asset_rules(q, {"door": "<door>"}, ["<door>", "<extra>"]), ["error:asset_unreferenced"])
+        self.assertEqual(self.asset_rules(q, {"<door>": "a photo"}, ["<door>"]), ["error:asset_unreferenced"], "object keys are not replaced")
+        self.assertEqual(self.asset_rules(q, {"door": "cat"}, ["cat"]), ["warning:asset_reference_ambiguous"])
+        long = "<" + "x" * 1_100 + ">"
+        self.assertEqual(self.asset_rules(q, {"door": long}, [long]), ["error:asset_reference_size"])
+        twice = {"a": {"type": "noul", "instructions": "Is `door` the person in <badge>?"},
+                 "b": {"type": "noul", "instructions": "Does `door` show the uniform in <badge>?"}}
+        self.assertEqual(self.asset_rules(twice, {"door": "<door>"}, ["<door>", "<badge>"]), ["warning:asset_in_many_instructions"])
+        criteria = {"g": {"type": "choice", "instructions": "Which gesture is in `camera`?", "criteria": {"thumbs_up": {"examples": ["<thumb>"]}, "none": None}}}
+        self.assertEqual(self.asset_rules(criteria, {"camera": "<cam>"}, ["<cam>", "<thumb>"]), [])
+
+    def test_each_use_reserves_image_tokens(self):
+        q = {"q": {"type": "noul", "instructions": "Is `door` the person in <badge>?"}}
+        plain = lint(q, {"door": "<door>"})["estimated_tokens"]
+        images = lint(q, {"door": "<door>"}, assets=["<door>", "<badge>"])["estimated_tokens"]
+        self.assertEqual(images["state"] - plain["state"], IMAGE_TOKENS_PER_USE)
+        self.assertEqual(images["questions"] - plain["questions"], IMAGE_TOKENS_PER_USE)
 
 
 if __name__ == "__main__":

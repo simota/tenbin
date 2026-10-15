@@ -5,7 +5,8 @@ Mirrors the rules of tenbin (src/lint.ts). Usage:
 
     python lint_questions.py questions.json [--state state.json] [--max-tokens 64000] [--forbidden cardNumber,customer.ssn] [--model jev-preview]
 
-questions.json is either {"<id>": {...}} or {"state": ..., "questions": {...}} (optionally with "model").
+questions.json is either {"<id>": {...}} or {"state": ..., "questions": {...}} (optionally with "model",
+and with "assets": {"<reference>": ...} to check image references; only the keys are read).
 Exit code 1 when any error is found.
 """
 from __future__ import annotations
@@ -21,6 +22,9 @@ TOTAL_TOKENS = 64_000
 STATE_AND_LONGEST = 32_000
 MAX_CHOICE_OPTIONS = 255
 MIN_SCORE_LEVELS, MAX_SCORE_LEVELS = 2, 10
+MAX_REFERENCE_BYTES, MAX_ALL_REFERENCES_BYTES = 1_024, 65_536
+# Provisional and unmeasured: TypeSafe publishes no image-token estimate yet (docs: /images).
+IMAGE_TOKENS_PER_USE = 3_300
 
 DEGREE_ONLY = re.compile(
     r"^(very|somewhat|moderately|slightly|extremely|quite|fairly|highly|mildly|a bit|a little)?\s*"
@@ -67,8 +71,56 @@ def text(v: Any) -> str:
     return v if isinstance(v, str) else json.dumps(v if v is not None else "", ensure_ascii=False)
 
 
-def tokens(v: Any) -> int:
-    return math.ceil(len(json.dumps(v if v is not None else None, ensure_ascii=False, separators=(",", ":"))) / 4)
+def tokens(v: Any, image_refs: list[str] | None = None) -> int:
+    encoded = json.dumps(v if v is not None else None, ensure_ascii=False, separators=(",", ":"))
+    uses = sum(encoded.count(json.dumps(r, ensure_ascii=False)[1:-1]) for r in image_refs or [])
+    return math.ceil(len(encoded) / 4) + uses * IMAGE_TOKENS_PER_USE
+
+
+def string_values(v: Any) -> list[str]:
+    """String values, never object keys: the API does not replace references in keys."""
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, list):
+        return [s for item in v for s in string_values(item)]
+    if isinstance(v, dict):
+        return [s for item in v.values() for s in string_values(item)]
+    return []
+
+
+def lint_assets(questions: dict[str, Any], state: Any, refs: list[str]) -> list[dict[str, str]]:
+    """Findings for the images a request sends, against where its state and questions reference them."""
+    findings: list[dict[str, str]] = []
+
+    def push(qid: str, rule: str, sev: str, msg: str, fix: str) -> None:
+        findings.append({"question_id": qid, "rule": rule, "severity": sev, "message": msg, "fix": fix})
+
+    qs = {qid: q for qid, q in questions.items() if isinstance(q, dict)}
+    if not refs:
+        for qid, q in qs.items():
+            if q.get("type") == "box":
+                push(qid, "box_without_image", "error", "Box questions need an image in the request", "Add the image to assets and write its reference in state.")
+        return findings
+    values = string_values(state) + [s for q in qs.values() for s in string_values([q.get("instructions"), q.get("criteria")])]
+    for ref in refs:
+        size = len(ref.encode("utf-8"))
+        if not any(ref in v for v in values):
+            push("", "asset_unreferenced", "error", f'asset "{ref}" is not referenced in state, instructions or criteria (the API returns 400)',
+                 "Write the reference where the image belongs, or remove the asset.")
+        if size > MAX_REFERENCE_BYTES:
+            push("", "asset_reference_size", "error", f'asset reference "{ref[:40]}…" is {size} bytes; the limit is {MAX_REFERENCE_BYTES}',
+                 "Use a short reference such as <photo> or a UUID.")
+        if re.fullmatch(r"\w+", ref, re.ASCII):
+            push("", "asset_reference_ambiguous", "warning", f'asset reference "{ref}" can match inside ordinary text (references match as plain text)',
+                 "Use a delimited reference such as <photo> or a UUID.")
+        in_instructions = [qid for qid, q in qs.items() if any(ref in v for v in string_values(q.get("instructions")))]
+        if len(in_instructions) >= 2:
+            push("", "asset_in_many_instructions", "warning", f'asset "{ref}" is in the instructions of {", ".join(in_instructions)}; each use sends the image again',
+                 "Put it in state once and refer to it by path from each question.")
+    total = sum(len(r.encode("utf-8")) for r in refs)
+    if total > MAX_ALL_REFERENCES_BYTES:
+        push("", "asset_reference_size", "error", f"asset references total {total} bytes; the limit is {MAX_ALL_REFERENCES_BYTES}", "Use shorter references.")
+    return findings
 
 
 def joins(s: str) -> int:
@@ -143,7 +195,7 @@ def forbidden_state_paths(state: Any, forbidden: list[str]) -> list[str]:
 
 
 def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_TOKENS, forbidden: list[str] | None = None,
-         model: str | None = None) -> dict[str, Any]:
+         model: str | None = None, assets: list[str] | None = None) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
 
     def push(qid: str, rule: str, sev: str, msg: str, fix: str) -> None:
@@ -241,6 +293,9 @@ def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_T
         push("", "box_without_presence_check", "info", "A Box answer is always a box, even when the target is absent",
              'Ask a Noul such as "Is there a coffee mug in `photo`?" in the same request and ignore the box when it is low.')
 
+    if assets is not None:
+        findings.extend(lint_assets(questions, state, assets))
+
     if state is not None:
         for path in forbidden_state_paths(state, forbidden or []):
             push("", "state_path_forbidden", "error", f"state contains forbidden path `{path}`",
@@ -253,8 +308,8 @@ def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_T
                 push("", "state_field_unused", "warning", f"state field `{path}` is not referenced by any question",
                      "Remove it from the state (irrelevant content lowers accuracy) or reference it from a question.")
 
-    est_state = tokens(state if state is not None else "")
-    per_q = [tokens(q) for q in questions.values()]
+    est_state = tokens(state if state is not None else "", assets)
+    per_q = [tokens(q, assets) for q in questions.values()]
     est_questions = sum(per_q)
     longest = max(per_q, default=0)
     total = est_state + est_questions
@@ -289,14 +344,16 @@ def main() -> int:
         doc = json.load(fh)
     state = None
     model = None
+    assets = None
     questions = doc
     if isinstance(doc, dict) and "questions" in doc and isinstance(doc["questions"], dict) and "type" not in doc:
         questions, state, model = doc["questions"], doc.get("state"), doc.get("model")
+        assets = list(doc["assets"]) if isinstance(doc.get("assets"), dict) else None
     if args.state:
         with open(args.state, encoding="utf-8") as fh:
             state = json.load(fh)
 
-    result = lint(questions, state, args.max_tokens, [f for f in args.forbidden.split(",") if f], args.model or model)
+    result = lint(questions, state, args.max_tokens, [f for f in args.forbidden.split(",") if f], args.model or model, assets)
     json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
     print()
     return 1 if result["errors"] else 0

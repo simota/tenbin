@@ -103,6 +103,57 @@ export function forbiddenStatePaths(state: unknown, forbidden: string[]): string
 export interface LintOptions {
   /** The model the request will name; Box questions are checked against it when given. */
   model?: string;
+  /** Image references the request sends in `assets`; asset rules run only when given. */
+  assets?: readonly string[];
+}
+
+/** API limits on image references (docs: /images#references), in UTF-8 bytes. */
+const MAX_REFERENCE_BYTES = 1_024;
+const MAX_ALL_REFERENCES_BYTES = 65_536;
+
+/** String values (never object keys: the API does not replace references in keys). */
+function stringValues(value: unknown, out: string[] = []): string[] {
+  if (typeof value === "string") out.push(value);
+  else if (Array.isArray(value)) for (const v of value) stringValues(v, out);
+  else if (isPlainObject(value)) for (const v of Object.values(value)) stringValues(v, out);
+  return out;
+}
+
+/** Findings for the images a request sends, against where its state and questions reference them. */
+export function lintAssets(questions: Questions, state: unknown, refs: readonly string[]): Finding[] {
+  const findings: Finding[] = [];
+  const push = (question_id: string, rule: string, severity: Severity, message: string, fix: string) => findings.push({ question_id, rule, severity, message, fix });
+  const ids = Object.keys(questions);
+  const boxes = ids.filter((id) => (questions[id] as Question).type === "box");
+  if (refs.length === 0) {
+    for (const id of boxes) push(id, "box_without_image", "error", "Box questions need an image in the request", "Add the image to assets and write its reference in state.");
+    return findings;
+  }
+  const values = [...stringValues(state), ...ids.flatMap((id) => {
+    const q = questions[id] as Question;
+    return stringValues([q.instructions, "criteria" in q ? q.criteria : null]);
+  })];
+  const bytes = (s: string) => Buffer.byteLength(s, "utf8");
+  for (const ref of refs) {
+    if (!values.some((v) => v.includes(ref))) {
+      push("", "asset_unreferenced", "error", `asset "${ref}" is not referenced in state, instructions or criteria (the API returns 400)`, "Write the reference where the image belongs, or remove the asset.");
+    }
+    if (bytes(ref) > MAX_REFERENCE_BYTES) {
+      push("", "asset_reference_size", "error", `asset reference "${ref.slice(0, 40)}…" is ${bytes(ref)} bytes; the limit is ${MAX_REFERENCE_BYTES}`, "Use a short reference such as <photo> or a UUID.");
+    }
+    if (/^\w+$/.test(ref)) {
+      push("", "asset_reference_ambiguous", "warning", `asset reference "${ref}" can match inside ordinary text (references match as plain text)`, "Use a delimited reference such as <photo> or a UUID.");
+    }
+    const inInstructions = ids.filter((id) => stringValues((questions[id] as Question).instructions).some((v) => v.includes(ref)));
+    if (inInstructions.length >= 2) {
+      push("", "asset_in_many_instructions", "warning", `asset "${ref}" is in the instructions of ${inInstructions.join(", ")}; each use sends the image again`, "Put it in state once and refer to it by path from each question.");
+    }
+  }
+  const total = refs.reduce((n, ref) => n + bytes(ref), 0);
+  if (total > MAX_ALL_REFERENCES_BYTES) {
+    push("", "asset_reference_size", "error", `asset references total ${total} bytes; the limit is ${MAX_ALL_REFERENCES_BYTES}`, "Use shorter references.");
+  }
+  return findings;
 }
 
 /**
@@ -238,6 +289,8 @@ export function lintQuestions(questions: Questions, state?: unknown, maxTokensPe
     findings.push({ question_id: "", rule: "box_without_presence_check", severity: "info", message: "A Box answer is always a box, even when the target is absent", fix: "Ask a Noul such as \"Is there a coffee mug in `photo`?\" in the same request and ignore the box when it is low." });
   }
 
+  if (options.assets !== undefined) findings.push(...lintAssets(questions, state, options.assets));
+
   if (state !== undefined) {
     for (const path of forbiddenStatePaths(state, forbidden)) {
       findings.push({ question_id: "", rule: "state_path_forbidden", severity: "error", message: `state contains forbidden path \`${path}\``, fix: "Remove the field in code before building the state; the model must never see it." });
@@ -251,7 +304,7 @@ export function lintQuestions(questions: Questions, state?: unknown, maxTokensPe
     }
   }
 
-  const est = estimateRequestTokens(state ?? "", questions);
+  const est = estimateRequestTokens(state ?? "", questions, options.assets);
   if (est.total > Math.min(maxTokensPerCall, API_LIMITS.totalTokens)) {
     findings.push({ question_id: "", rule: "token_budget", severity: "error", message: `estimated ${est.total} tokens for state + questions exceeds the ${Math.min(maxTokensPerCall, API_LIMITS.totalTokens)} token limit`, fix: "Send only the state fields the questions need, or split states across calls (tenbin_evaluate_many)." });
   } else if (est.state + est.longestQuestion > API_LIMITS.stateAndLongestQuestionTokens) {

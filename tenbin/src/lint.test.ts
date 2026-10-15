@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { boxModelSupport, lintQuestions, resolvePath } from "./lint.js";
+import { IMAGE_TOKENS_PER_USE } from "./config.js";
+import { boxModelSupport, lintAssets, lintQuestions, resolvePath } from "./lint.js";
 import type { Questions } from "./types.js";
 
 const rules = (r: ReturnType<typeof lintQuestions>) => [...r.errors, ...r.warnings, ...r.infos].map((f) => f.rule);
@@ -142,4 +143,33 @@ test("boxModelSupport reads Jev versions and leaves unknown names to the API", (
     ["jev-preview", "jev-1.14.0", "jev-1.15.2", "jev-2.0.0", "jev-1.13.0", "jev-1.9.0", "jev-latest", "custom"].map(boxModelSupport),
     ["yes", "yes", "yes", "yes", "no", "no", "alias", "unknown"],
   );
+});
+
+test("asset rules: unreferenced, key-only, oversized, ambiguous and repeated references; Box needs an image", () => {
+  const rulesFor = (questions: Questions, state: unknown, assets: string[]) =>
+    [...lintAssets(questions, state, assets)].map((f) => `${f.severity}:${f.rule}`);
+  const noul = { type: "noul", instructions: "Is there a person in `door`?" } as const;
+
+  assert.deepEqual(rulesFor({ q: noul }, { door: "<door>" }, ["<door>"]), []);
+  assert.deepEqual(rulesFor({ q: noul }, { door: "<door>" }, ["<door>", "<extra>"]), ["error:asset_unreferenced"]);
+  assert.deepEqual(rulesFor({ q: noul }, { "<door>": "a photo" }, ["<door>"]), ["error:asset_unreferenced"], "object keys are not replaced");
+  assert.deepEqual(rulesFor({ q: noul }, { door: "cat" }, ["cat"]), ["warning:asset_reference_ambiguous"]);
+  const long = `<${"x".repeat(1_100)}>`;
+  assert.deepEqual(rulesFor({ q: noul }, { door: long }, [long]), ["error:asset_reference_size"]);
+  const twice = { a: { type: "noul", instructions: "Is `door` the person in <badge>?" }, b: { type: "noul", instructions: "Does `door` show the uniform in <badge>?" } } as const;
+  assert.deepEqual(rulesFor(twice, { door: "<door>" }, ["<door>", "<badge>"]), ["warning:asset_in_many_instructions"]);
+  const criteria = { g: { type: "choice", instructions: "Which gesture is in `camera`?", criteria: { thumbs_up: { examples: ["<thumb>"] }, none: null } } } as const;
+  assert.deepEqual(rulesFor(criteria, { camera: "<cam>" }, ["<cam>", "<thumb>"]), [], "references inside criteria count");
+
+  const box = { mug: { type: "box", instructions: "the coffee mug in `photo`" } } as const;
+  assert.deepEqual(rulesFor(box, { photo: "a kitchen" }, []), ["error:box_without_image"]);
+  assert.ok(!lintQuestions(box, { photo: "a kitchen" }).errors.length, "asset rules run only when the request's assets are known");
+});
+
+test("each use of an image reference reserves image tokens in the estimate", () => {
+  const questions: Questions = { q: { type: "noul", instructions: "Is `door` the person in <badge>?" } };
+  const plain = lintQuestions(questions, { door: "<door>" }).estimated_tokens;
+  const images = lintQuestions(questions, { door: "<door>" }, undefined, [], { assets: ["<door>", "<badge>"] }).estimated_tokens;
+  assert.equal(images.state - plain.state, IMAGE_TOKENS_PER_USE);
+  assert.equal(images.questions - plain.questions, IMAGE_TOKENS_PER_USE);
 });

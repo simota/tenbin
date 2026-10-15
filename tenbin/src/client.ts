@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import {
   APIConnectionError,
   APIError,
@@ -8,7 +10,9 @@ import {
   RateLimitError,
   TypeSafeClient,
   UnprocessableEntityError,
+  image,
   type Fetch,
+  type Image,
   type Logger,
   type ModelCard,
 } from "@typesafe-ai/sdk";
@@ -35,6 +39,35 @@ const STDERR_LOGGER: Logger = {
 
 export class BudgetExceededError extends Error {}
 export class CallTooLargeError extends Error {}
+export class AssetError extends Error {}
+
+/** Image references mapped to the local files they stand for (MCP input). */
+export type AssetPaths = Record<string, { path: string }>;
+
+const IMAGES_HEADER = "TypeSafe-Danger-Zone-Images";
+const IMAGE_SIGNATURES = [Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a), Uint8Array.of(0xff, 0xd8, 0xff)];
+
+/**
+ * Reads each file and refuses anything that is not a PNG or JPEG, so a path cannot upload an
+ * arbitrary local file. Size and dimension limits are left to the API, which rejects precisely.
+ */
+export async function loadImages(assets: AssetPaths): Promise<Record<string, Image>> {
+  const out: Record<string, Image> = {};
+  for (const [ref, { path }] of Object.entries(assets)) {
+    if (!isAbsolute(path)) throw new AssetError(`asset "${ref}": path must be absolute, got ${path}`);
+    let bytes: Uint8Array;
+    try {
+      bytes = await readFile(path);
+    } catch (err) {
+      throw new AssetError(`asset "${ref}": cannot read ${path}: ${(err as Error).message}`);
+    }
+    if (!IMAGE_SIGNATURES.some((sig) => sig.every((b, i) => bytes[i] === b))) {
+      throw new AssetError(`asset "${ref}": ${path} is not a PNG or JPEG file. Convert GIF, WebP or HEIC to PNG or JPEG first.`);
+    }
+    out[ref] = image(bytes);
+  }
+  return out;
+}
 
 /** Wraps the SDK client with per-call and per-session limits and usage accounting. */
 export class TypeSafeGateway {
@@ -85,8 +118,8 @@ export class TypeSafeGateway {
    * Throws before the call if the estimate breaks the per-call limits (total, and the API's
    * state + longest question rule) or the session budget, counting calls still in flight.
    */
-  assertWithinLimits(state: unknown, questions: Questions): number {
-    const est = estimateRequestTokens(state, questions);
+  assertWithinLimits(state: unknown, questions: Questions, imageRefs: readonly string[] = []): number {
+    const est = estimateRequestTokens(state, questions, imageRefs);
     if (est.total > this.config.maxTokensPerCall) {
       throw new CallTooLargeError(`estimated ${est.total} input tokens exceeds the per-call limit of ${this.config.maxTokensPerCall}. Send only the state fields the questions need, split states across tenbin_evaluate_many, or use tenbin_rank which batches automatically.`);
     }
@@ -100,14 +133,21 @@ export class TypeSafeGateway {
     return est.total;
   }
 
-  async systemOne(state: unknown, questions: Questions, model?: string, signal?: AbortSignal): Promise<EvaluateResult> {
-    const reserved = this.assertWithinLimits(state, questions);
+  async systemOne(state: unknown, questions: Questions, model?: string, signal?: AbortSignal, assets?: AssetPaths): Promise<EvaluateResult> {
+    // Files are read before the budget check so that no await separates the check from the reservation.
+    const images = assets && Object.keys(assets).length > 0 ? await loadImages(assets) : undefined;
+    const reserved = this.assertWithinLimits(state, questions, images ? Object.keys(images) : []);
     this.reservedTokens += reserved;
+    const experimental = images !== undefined || Object.values(questions).some((q) => q.type === "box");
+    const options = {
+      ...(signal ? { signal } : {}),
+      ...(experimental ? { headers: { [IMAGES_HEADER]: "true" } } : {}),
+    };
     const started = Date.now();
     this.calls += 1;
     try {
       const { data, requestId } = await this.client
-        .systemOne({ state: state as never, questions: questions as never, ...(model ? { model } : {}) }, signal ? { signal } : undefined)
+        .systemOne({ state: state as never, questions: questions as never, ...(model ? { model } : {}), ...(images ? { assets: images } : {}) }, options)
         .withResponse();
       const usage = data.usage as Usage;
       this.inputTokens += usage.input_tokens ?? 0;
@@ -148,7 +188,7 @@ export function isBatchWideError(err: unknown): boolean {
 
 /** Turns SDK errors into messages that tell the agent what to do next. */
 export function describeError(err: unknown): string {
-  if (err instanceof BudgetExceededError || err instanceof CallTooLargeError) return err.message;
+  if (err instanceof BudgetExceededError || err instanceof CallTooLargeError || err instanceof AssetError) return err.message;
   if (isCancellation(err)) return "Request cancelled by the client.";
   if (err instanceof AuthenticationError) {
     return "TypeSafe rejected the API key (401). Check TYPESAFE_API_KEY; create a key at https://console.typesafe.ai/settings/keys.";
@@ -159,6 +199,12 @@ export function describeError(err: unknown): string {
   if (err instanceof RateLimitError) {
     const wait = err.retryAfterMs ? ` Retry after ${err.retryAfterMs} ms.` : "";
     return `Rate limited (429) after the SDK's automatic retries.${wait} Lower concurrency or split the batch.`;
+  }
+  if (err instanceof APIError && err.status === 413) {
+    return `TypeSafe API error 413: ${err.message}. The request is over a size limit: 16 MiB per image file, 256–1568 px per side, 32 MiB for the body, all images, or the request with every reference expanded. Send fewer or smaller images, or move an image used by several questions into state.`;
+  }
+  if (err instanceof APIError && err.status === 400) {
+    return `TypeSafe API error 400: ${err.message}. If the request has images: PNG or JPEG stills only, 256–1568 px per side, pixels rotated upright (EXIF orientation is not applied), every asset referenced, and Box needs model jev-preview.`;
   }
   if (err instanceof APIError) {
     return `TypeSafe API error ${err.status}: ${err.message}${err.status >= 500 ? " (temporary; retry shortly)" : ""}`;
