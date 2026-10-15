@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { IMAGE_TOKENS_PER_USE } from "./config.js";
 import { boxModelSupport, lintAssets, lintQuestions, resolvePath } from "./lint.js";
 import type { Questions } from "./types.js";
 
@@ -166,10 +165,11 @@ test("asset rules: unreferenced, key-only, oversized, ambiguous and repeated ref
   assert.ok(!lintQuestions(box, { photo: "a kitchen" }).errors.length, "asset rules run only when the request's assets are known");
 });
 
-test("each use of an image reference reserves image tokens in the estimate", () => {
-  const questions: Questions = { q: { type: "noul", instructions: "Is `door` the person in <badge>?" } };
-  const plain = lintQuestions(questions, { door: "<door>" }).estimated_tokens;
-  const images = lintQuestions(questions, { door: "<door>" }, undefined, [], { assets: ["<door>", "<badge>"] }).estimated_tokens;
-  assert.equal(images.state - plain.state, IMAGE_TOKENS_PER_USE);
-  assert.equal(images.questions - plain.questions, IMAGE_TOKENS_PER_USE);
+test("image references add nothing to the token estimate; the API owns the image-token limit", () => {
+  const frames = Array.from({ length: 12 }, (_, i) => `<frame-${i}>`);
+  const questions: Questions = { q: { type: "noul", instructions: "Did the door in `frames` open?" } };
+  const plain = lintQuestions(questions, { frames }).estimated_tokens;
+  const images = lintQuestions(questions, { frames }, undefined, [], { assets: frames });
+  assert.deepEqual(images.estimated_tokens, plain);
+  assert.ok(!images.errors.some((f) => f.rule === "token_budget"), "twelve images are not refused on a guessed per-image cost");
 });

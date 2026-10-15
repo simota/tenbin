@@ -10,13 +10,6 @@ export const API_LIMITS = {
   maxScoreLevels: 10,
 } as const;
 
-/**
- * Input tokens reserved per use of an image reference, for the pre-call limit and budget checks.
- * Provisional and unmeasured: TypeSafe publishes no image-token estimate yet (docs: /images),
- * and actual usage still comes from the response.
- */
-export const IMAGE_TOKENS_PER_USE = 3_300;
-
 export interface Config {
   apiKey: string | undefined;
   defaultModel: string;

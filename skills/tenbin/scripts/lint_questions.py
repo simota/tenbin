@@ -23,8 +23,6 @@ STATE_AND_LONGEST = 32_000
 MAX_CHOICE_OPTIONS = 255
 MIN_SCORE_LEVELS, MAX_SCORE_LEVELS = 2, 10
 MAX_REFERENCE_BYTES, MAX_ALL_REFERENCES_BYTES = 1_024, 65_536
-# Provisional and unmeasured: TypeSafe publishes no image-token estimate yet (docs: /images).
-IMAGE_TOKENS_PER_USE = 3_300
 
 DEGREE_ONLY = re.compile(
     r"^(very|somewhat|moderately|slightly|extremely|quite|fairly|highly|mildly|a bit|a little)?\s*"
@@ -71,10 +69,8 @@ def text(v: Any) -> str:
     return v if isinstance(v, str) else json.dumps(v if v is not None else "", ensure_ascii=False)
 
 
-def tokens(v: Any, image_refs: list[str] | None = None) -> int:
-    encoded = json.dumps(v if v is not None else None, ensure_ascii=False, separators=(",", ":"))
-    uses = sum(encoded.count(json.dumps(r, ensure_ascii=False)[1:-1]) for r in image_refs or [])
-    return math.ceil(len(encoded) / 4) + uses * IMAGE_TOKENS_PER_USE
+def tokens(v: Any) -> int:
+    return math.ceil(len(json.dumps(v if v is not None else None, ensure_ascii=False, separators=(",", ":"))) / 4)
 
 
 def string_values(v: Any) -> list[str]:
@@ -308,8 +304,10 @@ def lint(questions: dict[str, Any], state: Any = None, max_tokens: int = TOTAL_T
                 push("", "state_field_unused", "warning", f"state field `{path}` is not referenced by any question",
                      "Remove it from the state (irrelevant content lowers accuracy) or reference it from a question.")
 
-    est_state = tokens(state if state is not None else "", assets)
-    per_q = [tokens(q, assets) for q in questions.values()]
+    # Images add nothing here: their token cost is unpublished, so the API's 400
+    # max_tokens_exceeded is the check (.genius/decisions/image-token-limit-ownership.md).
+    est_state = tokens(state if state is not None else "")
+    per_q = [tokens(q) for q in questions.values()]
     est_questions = sum(per_q)
     longest = max(per_q, default=0)
     total = est_state + est_questions

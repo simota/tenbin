@@ -230,7 +230,7 @@ Compare with the previous accuracy-per-band table. If accuracy in the automation
 - `rank`: over 255 candidates / over the token cap is batched automatically with a final round. Add `existence_check` to also detect "no match".
 - `walk_taxonomy`: chunked automatically per level. Lowering `subtree_token_limit` summarizes the descriptions.
 - `evaluate_many`: above 500 states, split into multiple calls.
-- Images (experimental): resize the longest side to ≤ 1568 px and rotate the pixels upright before passing `assets`; put an image several questions use in `state` once. Each image reserves `IMAGE_TOKENS_PER_USE` (provisional) per use against the per-call and session budgets.
+- Images (experimental): resize the longest side to ≤ 1568 px and rotate the pixels upright before passing `assets`; put an image several questions use in `state` once. Image tokens are not estimated before the call: lint's token budget and the per-call guard count text only, the API answers an over-context request with `400 max_tokens_exceeded`, and the session budget counts actual usage after each call.
 
 ---
 

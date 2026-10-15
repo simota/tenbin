@@ -106,8 +106,9 @@ until measured on labelled data.
 
 Images: the server reads each absolute path itself, refuses anything that is not PNG or JPEG,
 and sends `TypeSafe-Danger-Zone-Images: true` only on calls with images or Box. Limits (256–1568 px
-per side, 32 MiB) are the API's; pixels must already be upright. The per-image token reservation
-(`IMAGE_TOKENS_PER_USE` in `src/config.ts`) is provisional until TypeSafe publishes an estimate.
+per side, 32 MiB) are the API's; pixels must already be upright. Image tokens are not estimated
+before the call (TypeSafe publishes no rate yet): an over-context request comes back as
+`400 max_tokens_exceeded`, and actual `usage.input_tokens` is accounted after each call.
 `tenbin_rank` and `tenbin_walk_taxonomy` are text-only.
 
 Resources: `tenbin://guide/{suggestions,integration-design,question-design,primitives,confidence,patterns,jaggedness,cookbooks}`, `tenbin://examples/{triage,guardrail,extraction}`.

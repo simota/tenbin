@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lint_questions import IMAGE_TOKENS_PER_USE, lint, lint_assets  # noqa: E402
+from lint_questions import lint, lint_assets  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -168,12 +168,12 @@ class AssetReferences(unittest.TestCase):
         criteria = {"g": {"type": "choice", "instructions": "Which gesture is in `camera`?", "criteria": {"thumbs_up": {"examples": ["<thumb>"]}, "none": None}}}
         self.assertEqual(self.asset_rules(criteria, {"camera": "<cam>"}, ["<cam>", "<thumb>"]), [])
 
-    def test_each_use_reserves_image_tokens(self):
-        q = {"q": {"type": "noul", "instructions": "Is `door` the person in <badge>?"}}
-        plain = lint(q, {"door": "<door>"})["estimated_tokens"]
-        images = lint(q, {"door": "<door>"}, assets=["<door>", "<badge>"])["estimated_tokens"]
-        self.assertEqual(images["state"] - plain["state"], IMAGE_TOKENS_PER_USE)
-        self.assertEqual(images["questions"] - plain["questions"], IMAGE_TOKENS_PER_USE)
+    def test_image_references_add_nothing_to_the_estimate(self):
+        frames = [f"<frame-{i}>" for i in range(12)]
+        q = {"q": {"type": "noul", "instructions": "Did the door in `frames` open?"}}
+        images = lint(q, {"frames": frames}, assets=frames)
+        self.assertEqual(images["estimated_tokens"], lint(q, {"frames": frames})["estimated_tokens"])
+        self.assertNotIn("token_budget", {f["rule"] for f in images["errors"]})
 
 
 if __name__ == "__main__":

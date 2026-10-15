@@ -1,6 +1,9 @@
 # Image and Box support: plan
 
-Status: implemented 2026-10-15 (steps 1–4); the image-token constant is still unmeasured. Source: docs.typesafe.ai `/images`, `/primitives/box`,
+Status: implemented 2026-10-15 (steps 1–4). Superseded on one point the same day: images are no
+longer reserved at a guessed `IMAGE_TOKENS_PER_USE`; the API owns the image-token limit
+(`.genius/decisions/image-token-limit-ownership.md`). Gateway step 3 and the first risk below
+describe the earlier design. Source: docs.typesafe.ai `/images`, `/primitives/box`,
 `/models`, JS SDK changelog v0.7.0, the `@typesafe-ai/sdk@0.7.0` tarball.
 
 ## Decision

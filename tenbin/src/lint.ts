@@ -304,7 +304,9 @@ export function lintQuestions(questions: Questions, state?: unknown, maxTokensPe
     }
   }
 
-  const est = estimateRequestTokens(state ?? "", questions, options.assets);
+  // Images add nothing here: their token cost is unpublished, so the API's 400
+  // max_tokens_exceeded is the check (.genius/decisions/image-token-limit-ownership.md).
+  const est = estimateRequestTokens(state ?? "", questions);
   if (est.total > Math.min(maxTokensPerCall, API_LIMITS.totalTokens)) {
     findings.push({ question_id: "", rule: "token_budget", severity: "error", message: `estimated ${est.total} tokens for state + questions exceeds the ${Math.min(maxTokensPerCall, API_LIMITS.totalTokens)} token limit`, fix: "Send only the state fields the questions need, or split states across calls (tenbin_evaluate_many)." });
   } else if (est.state + est.longestQuestion > API_LIMITS.stateAndLongestQuestionTokens) {

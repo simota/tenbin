@@ -118,8 +118,8 @@ export class TypeSafeGateway {
    * Throws before the call if the estimate breaks the per-call limits (total, and the API's
    * state + longest question rule) or the session budget, counting calls still in flight.
    */
-  assertWithinLimits(state: unknown, questions: Questions, imageRefs: readonly string[] = []): number {
-    const est = estimateRequestTokens(state, questions, imageRefs);
+  assertWithinLimits(state: unknown, questions: Questions): number {
+    const est = estimateRequestTokens(state, questions);
     if (est.total > this.config.maxTokensPerCall) {
       throw new CallTooLargeError(`estimated ${est.total} input tokens exceeds the per-call limit of ${this.config.maxTokensPerCall}. Send only the state fields the questions need, split states across tenbin_evaluate_many, or use tenbin_rank which batches automatically.`);
     }
@@ -135,8 +135,10 @@ export class TypeSafeGateway {
 
   async systemOne(state: unknown, questions: Questions, model?: string, signal?: AbortSignal, assets?: AssetPaths): Promise<EvaluateResult> {
     // Files are read before the budget check so that no await separates the check from the reservation.
+    // Image tokens are not estimated (no published rate); the API rejects an over-context request
+    // with 400 max_tokens_exceeded, and actual usage is accounted after the call.
     const images = assets && Object.keys(assets).length > 0 ? await loadImages(assets) : undefined;
-    const reserved = this.assertWithinLimits(state, questions, images ? Object.keys(images) : []);
+    const reserved = this.assertWithinLimits(state, questions);
     this.reservedTokens += reserved;
     const experimental = images !== undefined || Object.values(questions).some((q) => q.type === "box");
     const options = {
@@ -204,7 +206,7 @@ export function describeError(err: unknown): string {
     return `TypeSafe API error 413: ${err.message}. The request is over a size limit: 16 MiB per image file, 256–1568 px per side, 32 MiB for the body, all images, or the request with every reference expanded. Send fewer or smaller images, or move an image used by several questions into state.`;
   }
   if (err instanceof APIError && err.status === 400) {
-    return `TypeSafe API error 400: ${err.message}. If the request has images: PNG or JPEG stills only, 256–1568 px per side, pixels rotated upright (EXIF orientation is not applied), every asset referenced, and Box needs model jev-preview.`;
+    return `TypeSafe API error 400: ${err.message}. If the request has images: PNG or JPEG stills only, 256–1568 px per side, pixels rotated upright (EXIF orientation is not applied), every asset referenced, and Box needs model jev-preview. max_tokens_exceeded means the images and text are over the context length: send fewer or smaller images, or move images from instructions into state.`;
   }
   if (err instanceof APIError) {
     return `TypeSafe API error ${err.status}: ${err.message}${err.status >= 500 ? " (temporary; retry shortly)" : ""}`;
