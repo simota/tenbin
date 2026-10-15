@@ -42,7 +42,7 @@ The existing `decompose_judgment` prompt uses the question-design workflow, also
 | `templates/guardrail.py` | Input/output guardrail (hazard Noul + severity Score) |
 | `templates/eval_thresholds.py` | Labeled CSV → table of accuracy per confidence band |
 | `scripts/lint_questions.py` | Same rules as the MCP's `tenbin_lint_questions` (offline) |
-| `scripts/evaluate.py` | Equivalent of the MCP's `tenbin_evaluate` / `tenbin_evaluate_many`. lint → API call → accuracy-per-band table. No dependencies; key from `TYPESAFE_API_KEY` or `~/.config/tenbin/env` |
+| `scripts/evaluate.py` | Equivalent of the MCP's `tenbin_evaluate` / `tenbin_evaluate_many`. lint → API call → accuracy-per-band table. Images via `assets` (PNG/JPEG paths, sent base64) and Box questions. No dependencies; key from `TYPESAFE_API_KEY` or `~/.config/tenbin/env` |
 | `scripts/estimate_cost.py` | Estimate tokens and cost from state / questions |
 | `scripts/evaluate_test.py`, `scripts/lint_questions_test.py` | Tests for `evaluate.py` (API replaced) and the lint rules; run with `make test` |
 

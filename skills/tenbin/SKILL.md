@@ -92,7 +92,9 @@ they need only Python 3 and the key in `TYPESAFE_API_KEY` or
 `~/.config/tenbin/env`. `evaluate.py` lints first and refuses on lint errors, like the MCP tool.
 If the key is missing, do not state measured numbers you did not obtain; say what the user
 must set (or run) to get them. `rows.jsonl` is one `{"state": ..., "labels": {"<id>": expected}}`
-per line; write it from the user's CSV or DB in code, never by hand.
+per line; write it from the user's CSV or DB in code, never by hand. Images (experimental) go in
+`"assets": {"<photo>": {"path": "photo.jpg"}}` of the request or of a row, with `<photo>`
+written where the image belongs; Box questions need `"model": "jev-preview"`.
 
 Live docs remain authoritative: `https://docs.typesafe.ai/llms.txt`, append `.md` to a page path.
 

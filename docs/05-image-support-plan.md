@@ -108,6 +108,8 @@ Each step is one commit and leaves the suite green.
 ## Excluded
 
 - `skills/tenbin/scripts/evaluate.py` image sending (next step: base64 assets in JSON, stdlib only).
+  Done 2026-10-15: `assets` in the request (shared) and in rows, relative paths resolved against
+  the file that names them, base64 in JSON with the images header.
 - Images as `tenbin_rank` candidates or `tenbin_walk_taxonomy` items.
 - Base64 or URL input to the MCP tools; image resize, rotation or conversion.
 - Box confidence thresholds: none are published; they stay unmeasured until run on real images.

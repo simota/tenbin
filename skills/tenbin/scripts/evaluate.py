@@ -9,7 +9,7 @@ Many states, same questions, optional labels -> per-question stats and accuracy 
 
     python evaluate.py questions.json --rows rows.jsonl [--repeat N] [--concurrency N] [--out results.jsonl]
 
-rows.jsonl: one JSON object per line, {"state": ..., "labels": {"<question id>": <expected>}}.
+rows.jsonl: one JSON object per line, {"state": ..., "labels": {"<question id>": <expected>}, "assets"?: {...}}.
 Labels are optional; expected is the option name (Choice), the level index (Score) or a
 boolean / 1 / 0 / yes / no (Noul). Band = confidence (Choice, Score) or |noul - 0.5| * 2.
 
@@ -19,10 +19,17 @@ Never printed. Lint runs first and errors block the call, as the MCP tool does. 
 --budget-tokens per run. With --repeat > 1 each call carries a distinct `sample_uid` (object
 states get the field, other states are wrapped as {content, sample_uid}) so repeats are
 independent trials, as tenbin_evaluate_many and the self-consistency cookbooks do.
+
+Images (experimental): "assets": {"<photo>": {"path": "door.jpg"}} in the request (shared) or in a
+row, with the reference written where the image belongs in state, instructions or criteria.
+Relative paths resolve against the file that names them. Only PNG and JPEG are read; each is
+sent base64-encoded with the TypeSafe-Danger-Zone-Images header, which Box questions also get.
+Image tokens are not estimated before the call (the API answers 400 max_tokens_exceeded).
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import math
 import os
@@ -37,7 +44,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lint_questions import lint  # noqa: E402
+from lint_questions import lint, lint_assets  # noqa: E402
 
 DEFAULT_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_ENV_FILE = Path.home() / ".config" / "tenbin" / "env"
@@ -48,6 +55,8 @@ MAX_ATTEMPTS = 5
 MAX_RETRY_WAIT_S = 60.0  # the official SDKs cap Retry-After at 60 s
 RETRY_STATUSES = {408, 429, 529}  # plus every 5xx, as the official SDK retry policy
 TRUE_LABELS = {"1", "true", "yes", "y"}
+IMAGES_HEADER = "TypeSafe-Danger-Zone-Images"
+IMAGE_FORMATS = {b"\x89PNG\r\n\x1a\n": "png", b"\xff\xd8\xff": "jpg"}
 
 
 class ApiError(Exception):
@@ -69,6 +78,23 @@ def read_env_file(path: Path) -> dict[str, str]:
     return out
 
 
+def load_images(assets: dict[str, Any], base: Path) -> dict[str, dict[str, str]]:
+    """API asset entries for {ref: {path}}. Refuses anything that is not PNG or JPEG, so a path
+    cannot upload an arbitrary local file; size and dimension limits are left to the API."""
+    out: dict[str, dict[str, str]] = {}
+    for ref, spec in assets.items():
+        path = base / Path(spec["path"]).expanduser()
+        try:
+            data = path.read_bytes()
+        except OSError as e:
+            raise ValueError(f'asset "{ref}": cannot read {path}: {e.strerror}') from None
+        fmt = next((f for sig, f in IMAGE_FORMATS.items() if data.startswith(sig)), None)
+        if fmt is None:
+            raise ValueError(f'asset "{ref}": {path} is not a PNG or JPEG file. Convert GIF, WebP or HEIC to PNG or JPEG first.')
+        out[ref] = {"type": "image", "format": fmt, "data_base64": base64.b64encode(data).decode("ascii")}
+    return out
+
+
 def tokens(v: Any) -> int:
     return math.ceil(len(json.dumps(v, ensure_ascii=False, separators=(",", ":"))) / 4)
 
@@ -85,7 +111,7 @@ class Client:
         self.budget_tokens = budget_tokens
         self.calls = self.failures = self.input_tokens = self.output_tokens = 0
 
-    def system_one(self, state: Any, questions: dict[str, Any]) -> dict[str, Any]:
+    def system_one(self, state: Any, questions: dict[str, Any], assets: dict[str, Any] | None = None) -> dict[str, Any]:
         s, q, longest = estimate(state, questions)
         if s + q > TOTAL_TOKENS:
             raise ValueError(f"estimated {s + q} input tokens exceeds the per-call limit of {TOTAL_TOKENS}; trim the state")
@@ -93,13 +119,13 @@ class Client:
             raise ValueError(f"estimated state ({s}) + longest question ({longest}) exceeds the API limit of {STATE_AND_LONGEST}")
         if self.input_tokens + self.output_tokens + s + q > self.budget_tokens:
             raise ValueError(f"run budget of {self.budget_tokens} tokens would be exceeded; raise --budget-tokens")
-        body = json.dumps({"state": state, "model": self.model, "questions": questions}).encode("utf-8")
-        req = urllib.request.Request(
-            f"{self.base_url}/v1/systemone",
-            data=body,
-            method="POST",
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-        )
+        payload: dict[str, Any] = {"state": state, "model": self.model, "questions": questions}
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        if assets:
+            payload["assets"] = assets
+        if assets or any(q.get("type") == "box" for q in questions.values()):
+            headers[IMAGES_HEADER] = "true"
+        req = urllib.request.Request(f"{self.base_url}/v1/systemone", data=json.dumps(payload).encode("utf-8"), method="POST", headers=headers)
         started = time.monotonic()
         self.calls += 1
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -172,6 +198,12 @@ def describe(err: Exception) -> str:
             return f"TypeSafe rejected the request body (422){rid}: {err.body}. Run lint_questions.py on the same questions."
         if err.status == 429:
             return f"Rate limited (429) after {MAX_ATTEMPTS} attempts{rid}. Lower --concurrency."
+        if err.status == 413:
+            return (f"TypeSafe API error 413{rid}: {err.body[:300]}. Over a size limit: 16 MiB per image file, 256–1568 px per side, "
+                    "32 MiB for the body, all images, or the request with every reference expanded.")
+        if err.status == 400:
+            return (f"TypeSafe API error 400{rid}: {err.body[:300]}. If the request has images: PNG or JPEG stills, 256–1568 px per side, "
+                    "pixels rotated upright, every asset referenced, Box on jev-preview; max_tokens_exceeded means fewer or smaller images.")
         return f"TypeSafe API error {err.status}{rid}: {err.body[:300]}"
     return str(err)
 
@@ -198,11 +230,13 @@ def judge(qtype: str, ans: dict[str, Any], expected: Any) -> tuple[bool, float, 
 def signal_of(qtype: str, ans: dict[str, Any]) -> float:
     if qtype == "choice":
         return ans["probabilities"].get(ans["choice"], 0.0)
+    if qtype == "box":
+        return ans["confidence"] if ans.get("confidence") is not None else math.nan
     return ans["score"] if qtype == "score" else ans["noul"]
 
 
-def run_lint(questions: dict[str, Any], state: Any) -> None:
-    r = lint(questions, state)
+def run_lint(questions: dict[str, Any], state: Any, model: str, assets: list[str] | None = None) -> None:
+    r = lint(questions, state, model=model, assets=assets)
     for w in r["warnings"]:
         print(f"lint warning  {w['question_id']}: {w['message']}", file=sys.stderr)
     if r["errors"]:
@@ -211,8 +245,8 @@ def run_lint(questions: dict[str, Any], state: Any) -> None:
         sys.exit(2)
 
 
-def run_single(client: Client, state: Any, questions: dict[str, Any], repeat: int) -> None:
-    results = [client.system_one(with_sample_uid(state, f"s{i}") if repeat > 1 else state, questions) for i in range(repeat)]
+def run_single(client: Client, state: Any, questions: dict[str, Any], repeat: int, assets: dict[str, Any]) -> None:
+    results = [client.system_one(with_sample_uid(state, f"s{i}") if repeat > 1 else state, questions, assets) for i in range(repeat)]
     out: dict[str, Any] = results[0] if repeat == 1 else {"runs": results}
     if repeat > 1:
         spread = {}
@@ -226,7 +260,8 @@ def run_single(client: Client, state: Any, questions: dict[str, Any], repeat: in
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 
-def run_rows(client: Client, questions: dict[str, Any], rows: list[dict[str, Any]], args: argparse.Namespace) -> None:
+def run_rows(client: Client, questions: dict[str, Any], rows: list[dict[str, Any]], args: argparse.Namespace,
+             shared: dict[str, Any], rows_dir: Path) -> None:
     edges = [float(x) for x in args.bands.split(",")]
     qtypes = {qid: q["type"] for qid, q in questions.items()}
     stop = {"fatal": False}
@@ -234,10 +269,20 @@ def run_rows(client: Client, questions: dict[str, Any], rows: list[dict[str, Any
     def one(i: int, row: dict[str, Any]) -> dict[str, Any]:
         if stop["fatal"]:
             return {"row": i, "status": "skipped"}
+        # Image rules depend on the row (its own images and where its state names them), so a row
+        # that breaks them fails alone, without a call (mirrors tenbin_evaluate_many).
+        refs = [*shared, *row.get("assets", {})]
+        broken = [f for f in lint_assets(questions, row["state"], refs) if f["severity"] == "error"] if refs or args.has_box else []
+        if broken:
+            return {"row": i, "status": "failed", "error": "lint: " + " ".join(f"{f['message']}. {f['fix']}" for f in broken)}
+        try:
+            assets = {**shared, **load_images(row.get("assets", {}), rows_dir)}
+        except ValueError as e:
+            return {"row": i, "status": "failed", "error": str(e)}
         runs = []
         for k in range(args.repeat):
             try:
-                runs.append(client.system_one(with_sample_uid(row["state"], f"r{i}s{k}") if args.repeat > 1 else row["state"], questions))
+                runs.append(client.system_one(with_sample_uid(row["state"], f"r{i}s{k}") if args.repeat > 1 else row["state"], questions, assets))
             except ApiError as e:
                 if e.status in (401, 403):
                     stop["fatal"] = True
@@ -263,10 +308,10 @@ def run_rows(client: Client, questions: dict[str, Any], rows: list[dict[str, Any
             print(f"  row {r['row']}: {r['error']}")
 
     for qid, qtype in qtypes.items():
-        signals = [signal_of(qtype, run["answers"][qid]) for r in ok for run in r["runs"]]
+        signals = [x for x in (signal_of(qtype, run["answers"][qid]) for r in ok for run in r["runs"]) if not math.isnan(x)]
         if not signals:
             continue
-        line = f"{qid} ({qtype}): mean {statistics.mean(signals):.3f}"
+        line = f"{qid} ({qtype}{', confidence' if qtype == 'box' else ''}): mean {statistics.mean(signals):.3f}"
         if len(signals) > 1:
             line += f", std {statistics.pstdev(signals):.3f}"
         if qtype == "choice":
@@ -277,7 +322,7 @@ def run_rows(client: Client, questions: dict[str, Any], rows: list[dict[str, Any
             line += f"  repeat spread mean {statistics.mean(spreads):.3f} max {max(spreads):.3f}"
         print(line)
 
-        labelled = [r for r in ok if r.get("labels") and qid in r["labels"]]
+        labelled = [r for r in ok if r.get("labels") and qid in r["labels"] and qtype != "box"]
         if not labelled:
             continue
         per_band: dict[str, list[bool]] = defaultdict(list)
@@ -321,18 +366,25 @@ def main() -> None:
         doc = json.load(fh)
     questions = doc["questions"]
     client = Client(api_key, doc.get("model") or model, args.base_url, args.budget_tokens)
+    shared_assets = doc.get("assets") or {}
+    args.has_box = any(q.get("type") == "box" for q in questions.values())
 
     try:
+        shared = load_images(shared_assets, Path(args.request).resolve().parent)
         if args.rows:
             with open(args.rows, encoding="utf-8") as fh:
                 rows = [json.loads(line) for line in fh if line.strip()]
             if len(rows) > args.max_rows:
                 sys.exit(f"{len(rows)} rows exceeds --max-rows {args.max_rows}; split the file")
-            run_lint(questions, rows[0]["state"] if rows else None)
-            run_rows(client, questions, rows, args)
+            clashes = [f"row {i}: {ref}" for i, r in enumerate(rows) for ref in r.get("assets", {}) if ref in shared_assets]
+            if clashes:
+                sys.exit(f"asset references defined both in the request and in a row: {', '.join(clashes)}. Give each image one reference.")
+            # Question rules only: image rules are checked per row against that row's images.
+            run_lint(questions, rows[0]["state"] if rows else None, client.model)
+            run_rows(client, questions, rows, args, shared, Path(args.rows).resolve().parent)
         else:
-            run_lint(questions, doc.get("state"))
-            run_single(client, doc["state"], questions, args.repeat)
+            run_lint(questions, doc.get("state"), client.model, list(shared_assets))
+            run_single(client, doc["state"], questions, args.repeat, shared)
     except (ApiError, ValueError, RuntimeError) as e:
         sys.exit(describe(e))
 

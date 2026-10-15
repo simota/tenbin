@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -61,10 +62,12 @@ class FakeApi:
     def __init__(self, fail_first: list | None = None):
         self.requests: list[dict] = []
         self.auth: list[str | None] = []
+        self.images_header: list[str | None] = []
         self.fail_first = list(fail_first or [])
 
     def __call__(self, req, timeout=0):
         self.auth.append(req.headers.get("Authorization"))
+        self.images_header.append(req.get_header("Typesafe-danger-zone-images"))
         body = json.loads(req.data)
         self.requests.append(body)
         if self.fail_first:
@@ -76,6 +79,8 @@ class FakeApi:
         for qid, q in body["questions"].items():
             if q["type"] == "noul":
                 answers[qid] = {"type": "noul", "noul": 0.9 if n % 2 == 0 else 0.1}
+            elif q["type"] == "box":
+                answers[qid] = {"type": "box", "box": {"top": 0.25, "bottom": 0.82, "left": 0.44, "right": 0.84}, "confidence": 0.92}
             elif q["type"] == "choice":
                 probs = {k: (0.8 if k == cause else 0.1) for k in q["criteria"]}
                 answers[qid] = {"type": "choice", "choice": cause, "probabilities": probs, "confidence": 0.8}
@@ -391,6 +396,99 @@ class RowsMode(Base):
         code, _, err = self.run_cli(str(self.request), "--rows", str(rows), "--max-rows", "2", api=api)
         self.assertEqual(code, 1)
         self.assertIn("exceeds --max-rows", err)
+        self.assertEqual(api.requests, [])
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x01\x02\x03"
+JPEG = b"\xff\xd8\xff\xe0" + b"\x04\x05"
+DOOR_Q = {"person": {"type": "noul", "instructions": "Is there a person in `door`?"}}
+
+
+class Images(Base):
+    def write_request(self, doc: dict) -> Path:
+        p = self.dir / "image-request.json"
+        p.write_text(json.dumps(doc))
+        return p
+
+    def test_assets_are_sent_base64_with_the_images_header_and_relative_paths_resolve_to_the_request(self):
+        (self.dir / "door.jpg").write_bytes(JPEG)
+        (self.dir / "badge.png").write_bytes(PNG)
+        req = self.write_request({
+            "state": {"review": {"n": 0}, "door": "<door>"},
+            "assets": {"<door>": {"path": "door.jpg"}, "<badge>": {"path": str(self.dir / "badge.png")}},
+            "questions": {"same": {"type": "noul", "instructions": "Is the person in `door` the one in <badge>?"}},
+        })
+        api = FakeApi()
+        code, out, err = self.run_cli(str(req), api=api)
+        self.assertEqual(code, 0, err)
+        sent = api.requests[0]["assets"]
+        self.assertEqual(sent["<door>"], {"type": "image", "format": "jpg", "data_base64": base64.b64encode(JPEG).decode()})
+        self.assertEqual(sent["<badge>"]["format"], "png")
+        self.assertEqual(api.images_header, ["true"])
+
+    def test_text_only_requests_carry_no_assets_or_header(self):
+        api = FakeApi()
+        self.run_cli(str(self.request), api=api)
+        self.assertNotIn("assets", api.requests[0])
+        self.assertEqual(api.images_header, [None])
+
+    def test_non_image_file_and_unreferenced_asset_are_refused_before_any_call(self):
+        (self.dir / "notes.txt").write_text("secret notes")
+        (self.dir / "door.jpg").write_bytes(JPEG)
+        api = FakeApi()
+        not_image = self.write_request({"state": {"review": {"n": 0}, "door": "<door>"}, "assets": {"<door>": {"path": "notes.txt"}}, "questions": DOOR_Q})
+        code, _, err = self.run_cli(str(not_image), api=api)
+        self.assertEqual(code, 1)
+        self.assertIn("not a PNG or JPEG", err)
+        unreferenced = self.write_request({"state": {"review": {"n": 0}, "door": "<door>"}, "assets": {"<door>": {"path": "door.jpg"}, "<extra>": {"path": "door.jpg"}}, "questions": DOOR_Q})
+        code, _, err = self.run_cli(str(unreferenced), api=api)
+        self.assertEqual(code, 2)
+        self.assertIn("<extra>", err)
+        self.assertEqual(api.requests, [])
+
+    def test_rows_merge_shared_and_row_assets_and_a_broken_row_fails_alone(self):
+        (self.dir / "thumb.png").write_bytes(PNG)
+        (self.dir / "cam.jpg").write_bytes(JPEG)
+        questions = {"gesture": {"type": "choice", "instructions": "Which gesture is the hand in `camera` making?", "criteria": {"thumbs_up": "<thumb>", "none": "Another gesture."}}}
+        req = self.write_request({"assets": {"<thumb>": {"path": "thumb.png"}}, "questions": questions})
+        rows = self.dir / "rows.jsonl"
+        rows.write_text("\n".join(json.dumps(r) for r in [
+            {"state": {"review": {"n": 0}, "camera": "<cam1>"}, "assets": {"<cam1>": {"path": "cam.jpg"}}},
+            {"state": {"review": {"n": 1}, "camera": "<cam-2>"}, "assets": {"<cam2>": {"path": "cam.jpg"}}},
+        ]) + "\n")
+        api = FakeApi()
+        code, out, err = self.run_cli(str(req), "--rows", str(rows), "--concurrency", "1", api=api)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(api.requests), 1)
+        self.assertEqual(sorted(api.requests[0]["assets"]), ["<cam1>", "<thumb>"])
+        self.assertIn("ok 1  failed 1", out)
+        self.assertIn("<cam2>", out)
+
+    def test_box_rows_report_confidence_and_box_needs_an_image(self):
+        (self.dir / "kitchen.jpg").write_bytes(JPEG)
+        questions = {"mug_visible": {"type": "noul", "instructions": "Is there a coffee mug in `photo`?"}, "mug": {"type": "box", "instructions": "the coffee mug in `photo`"}}
+        req = self.write_request({"model": "jev-preview", "questions": questions})
+        rows = self.dir / "rows.jsonl"
+        rows.write_text("\n".join(json.dumps(r) for r in [
+            {"state": {"review": {"n": 0}, "photo": "<k>"}, "assets": {"<k>": {"path": "kitchen.jpg"}}, "labels": {"mug": "ignored"}},
+            {"state": {"review": {"n": 0}, "photo": "a kitchen"}},
+        ]) + "\n")
+        api = FakeApi()
+        code, out, err = self.run_cli(str(req), "--rows", str(rows), "--concurrency", "1", api=api)
+        self.assertEqual(code, 0, err)
+        self.assertIn("mug (box, confidence): mean 0.920", out)
+        self.assertIn("Box questions need an image", out)
+        self.assertEqual(len(api.requests), 1)
+        self.assertEqual(api.images_header, ["true"])
+
+    def test_box_on_jev_1_13_is_blocked_by_lint(self):
+        (self.dir / "kitchen.jpg").write_bytes(JPEG)
+        req = self.write_request({"model": "jev-1.13.0", "state": {"review": {"n": 0}, "photo": "<k>"}, "assets": {"<k>": {"path": "kitchen.jpg"}},
+                                  "questions": {"mug": {"type": "box", "instructions": "the coffee mug in `photo`"}}})
+        api = FakeApi()
+        code, _, err = self.run_cli(str(req), api=api)
+        self.assertEqual(code, 2)
+        self.assertIn("Jev 1.14", err)
         self.assertEqual(api.requests, [])
 
 
