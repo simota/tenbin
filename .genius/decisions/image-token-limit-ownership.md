@@ -33,3 +33,11 @@ Candidates not taken:
 - 2026-10-15: accepted and implemented. IMAGE_TOKENS_PER_USE removed from config.ts and
   lint_questions.py; tokens.ts back to text-only; the 400 hint now explains max_tokens_exceeded.
   Tests: twelve image uses leave the estimate unchanged and raise no token_budget error.
+- 2026-10-15: measured with real calls (evaluate.py and the MCP gateway). Image tokens per use
+  ~ width x height / 390, identical on jev-1.13.0 and jev-1.14.0 and for PNG and JPEG: 280x280 +202,
+  800x600 +1,278, 1568x1176 +4,706 (base 288). The removed 3,300 constant would have under-reserved
+  the largest size. Over-context: 6 uses of a 1568x1176 image = 28,571 tokens passed; 7 uses
+  returned a clean 400 {"error_type":"max_tokens_exceeded"} (req_01a13fe096a1769984e664703d880402).
+  Billing of that 400 is still unobserved (the API returns no usage; needs the console). The
+  refutation command has not fired (the "guidance ... soon" sentence is still on /images); the
+  empirical rate is unofficial, so the record stays open.
