@@ -422,10 +422,10 @@ Questions that depend on the model's answer can change even with a pinned versio
 | 1 | `tenbin_evaluate` + `lint` + `list_models` + resources, stdio | Minimal MCP that runs with npx, checked with the Inspector |
 | 2 | `evaluate_many` (budget, concurrency, repeat), `session_stats` | The threshold-decision loop runs |
 | 3 | `rank`, `walk_taxonomy`, prompts | Higher-level workflows equivalent to the cookbooks |
-| 4 | The full Skill (SKILL.md, reference, templates, scripts), official skill sync | Placed in the `agent-skills` repository, `make link-claude` |
+| 4 | The full Skill (SKILL.md, reference, templates, scripts), official skill sync | Placed in a separate skills repository, `make link-claude` |
 | 5 | Streamable HTTP, 10 evals, MCPB package | Team distribution |
 
 Open decisions (for the user):
-- Location: the MCP in a new `tenbin` repository; the Skill under `agent-skills` or inside this repository.
+- Location: the MCP in a new `tenbin` repository; the Skill in a separate skills repository or inside this repository.
 - Whether to raise the default session budget (equivalent to $0.84).
 - Whether to prepare a Python implementation (FastMCP) in parallel. The assumption is to start with TypeScript only.
