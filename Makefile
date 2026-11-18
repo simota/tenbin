@@ -17,7 +17,7 @@ MCP_CMD    := set -a; . "$$HOME/.config/tenbin/env"; set +a; exec node $(MCP_DIR
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test link unlink status link-claude link-codex link-agy unlink-claude unlink-codex unlink-agy \
+.PHONY: help test check link unlink status link-claude link-codex link-agy unlink-claude unlink-codex unlink-agy \
 	env-file build-mcp register-claude unregister-claude mcp-status install-claude
 
 help:
@@ -28,6 +28,7 @@ help:
 	@echo "make unlink[-*]     remove only links that point into this repo"
 	@echo "make status         show the current state of all three"
 	@echo "make test           run the skill script tests (python3, no network)"
+	@echo "make check          the same tests; what the root skills.sh check runs"
 	@echo ""
 	@echo "make env-file       create $(ENV_FILE) (chmod 600) if absent; put TYPESAFE_API_KEY=... in it"
 	@echo "make build-mcp      npm ci + npm run build in tenbin/"
@@ -65,6 +66,10 @@ endef
 
 test:
 	@python3 -m unittest discover -s skills/tenbin/scripts -p '*_test.py'
+
+# What the root skills.sh check runs: the skill script tests (the MCP server's
+# own tests need Node.js; run them with npm test in tenbin/).
+check: test
 
 env-file:
 	@if [ -f "$(ENV_FILE)" ]; then echo "ok      $(ENV_FILE) exists"; \
